@@ -1,368 +1,514 @@
-import os
-from flask import Flask, request, render_template_string, redirect, url_for, flash, session
+"""
+A complete, single-file Flask application boilerplate for a simple inventory-based website.
+
+HOW TO USE:
+1.  Prerequisites:
+    - Python 3
+    - A running MongoDB instance
+    - Run: pip install Flask pymongo
+
+2.  Customize the Store:
+    - Change the `STORE_SLUG_ID` variable below to a unique identifier for your store (e.g., 'janes-bookstore').
+    - Edit the `seed_database()` function with your store's name, details, product attributes, and initial inventory.
+
+3.  Run the Application:
+    - From your terminal, run: python app.py
+    - The first time you run it, it will populate the database with your store's information.
+    - Open your browser and go to http://127.0.0.1:5000
+
+4.  Log In and Manage:
+    - Go to http://127.0.0.1:5000/admin/login
+    - Use the email and password you set in the `seed_database()` function (default is owner@example.com / password123).
+"""
 import datetime
+from flask import Flask, request, render_template_string, redirect, url_for, flash, session, g, abort
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
 from functools import wraps
+from pymongo.errors import DuplicateKeyError
 
 # --- App & DB Configuration ---
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'mongodb-is-awesome-secret-key'
+app.config['SECRET_KEY'] = 'a-truly-generic-single-store-secret-key'
 
-# Connect to MongoDB
-client = MongoClient('mongodb://localhost:27017/')
-db = client['storefront_db'] # Must match the database name in seed_db.py
+# --- (STEP 1) CONFIGURE YOUR STORE'S UNIQUE ID ---
+# Change this to a unique, URL-friendly identifier for your store.
+STORE_SLUG_ID = 'my-awesome-store'
+
+# --- MongoDB Connection ---
+client = MongoClient('mongodb://localhost:27017/?retryWrites=true&w=majority&directConnection=true')
+db = client['single_store_db'] # You can rename this database if you wish.
+
+# --- Create Unique Indexes for Collections ---
+# These ensure data integrity, e.g., no two products can have the same SKU.
+db.stores.create_index("slug_id", unique=True)
+db.users.create_index([("email", 1), ("store_id", 1)], unique=True)
+db.products.create_index([("sku", 1), ("store_id", 1)], unique=True)
 
 
-# --- HTML Templates (Unchanged, included for completeness) ---
-LAYOUT_TEMPLATE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"><link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"><title>StoreFront</title></head><body class="bg-gray-100 text-gray-800"><nav class="bg-gray-800 text-white p-4"><div class="container mx-auto flex justify-between items-center"><a href="{{ url_for('home') }}" class="font-bold text-xl">StoreFront</a><div>{% if 'user_id' in session %}{% if session['user_role'] == 'owner' %}<a href="{{ url_for('admin_dashboard') }}" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Dashboard</a>{% elif session['user_role'] == 'buyer' %}<a href="{{ url_for('view_cart') }}" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Cart ({{ session.get('cart', {})|length }})</a>{% endif %}<a href="{{ url_for('logout') }}" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Logout</a>{% else %}<a href="{{ url_for('login') }}" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Login</a><a href="{{ url_for('register') }}" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Register</a>{% endif %}</div></div></nav><main class="container mx-auto mt-8 p-4">{% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}{% for category, message in messages %}<div class="p-4 mb-4 text-sm rounded-lg {{ 'bg-green-100 text-green-700' if category == 'success' else 'bg-red-100 text-red-700' }}" role="alert">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}{% block content %}{% endblock %}</main></body></html>"""
-BROWSE_BUSINESS_TEMPLATE = """<div class="bg-white p-6 rounded-lg shadow-lg"><a href="{{ url_for('home') }}" class="text-blue-500 hover:underline mb-4 inline-block">&larr; Back to All Businesses</a><h1 class="text-3xl font-bold">{{ business.name }}</h1><p class="text-gray-600 capitalize text-lg mb-6">{{ business.business_type.replace('_', ' ') }}</p><h2 class="text-2xl font-semibold mb-4">Available Products</h2><div class="grid grid-cols-1 md:grid-cols-2 gap-6">{% for product in business.products %}<div class="p-4 border rounded-lg flex flex-col justify-between"><div>{% if product.image_url %}<img src="{{ product.image_url }}" alt="Image of {{ product.name }}" class="w-full h-48 object-cover rounded-md mb-4" onerror="this.onerror=null;this.src='https://placehold.co/600x400/cccccc/ffffff?text=Image+Not+Found';">{% elif business.business_type == 'car_dealership' %}<img src="https://placehold.co/600x400/gray/white?text={{ product.name | replace(' ', '+') }}" alt="Placeholder for {{ product.name }}" class="w-full h-48 object-cover rounded-md mb-4">{% endif %}<h3 class="text-xl font-bold">{{ product.name }}</h3><p class="text-sm text-gray-500">SKU: {{ product.sku }}</p><p class="text-lg font-semibold text-green-600">${{ "%.2f"|format(product.price) }}</p><p class="text-gray-600 mt-2">{{ product.description }}</p><p class="font-semibold mt-2">Stock: <span class="{{ 'text-green-700' if product.inventory and product.inventory.quantity > 0 else 'text-red-700' }}">{{ product.inventory.quantity if product.inventory else 0 }} available</span></p></div>{% if 'user_id' in session and session['user_role'] == 'buyer' and product.inventory and product.inventory.quantity > 0 %}<form action="{{ url_for('add_to_cart', product_id=product._id) }}" method="post" class="mt-4 flex items-center gap-2"><input type="number" name="quantity" value="1" min="1" max="{{ product.inventory.quantity }}" class="w-20 p-2 border rounded-md"><button type="submit" class="flex-grow bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Add to Cart</button></form>{% elif not product.inventory or product.inventory.quantity == 0 %}<p class="mt-4 text-center font-bold p-2 rounded-md bg-gray-200 text-gray-500">Out of Stock</p>{% endif %}</div>{% else %}<p>This business has no products listed yet.</p>{% endfor %}</div></div>"""
-BUSINESS_DETAILS_TEMPLATE = """<div class="bg-white p-6 rounded-lg shadow-lg"><a href="{{ url_for('admin_dashboard') }}" class="text-blue-500 hover:underline mb-4 inline-block">&larr; Back to Dashboard</a><h1 class="text-3xl font-bold">{{ business.name }}</h1><p class="text-gray-600 capitalize text-lg mb-6">{{ business.business_type.replace('_', ' ') }}</p><div class="grid grid-cols-1 lg:grid-cols-2 gap-8"><div><h2 class="text-2xl font-semibold mb-2">Add New Product</h2><form action="{{ url_for('add_product', business_id=business._id) }}" method="post" class="space-y-3"><input type="text" name="name" placeholder="Product Name" class="w-full p-2 border rounded-md" required><input type="text" name="sku" placeholder="SKU" class="w-full p-2 border rounded-md" required><textarea name="description" placeholder="Description" class="w-full p-2 border rounded-md"></textarea><input type="url" name="image_url" placeholder="Image URL (e.g., https://...)" class="w-full p-2 border rounded-md"><input type="number" step="0.01" name="price" placeholder="Price" class="w-full p-2 border rounded-md" required><input type="number" name="initial_quantity" placeholder="Initial Quantity" class="w-full p-2 border rounded-md" required><button type="submit" class="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Add Product</button></form></div><div><h2 class="text-2xl font-semibold mb-2">Products & Inventory</h2><div class="space-y-4">{% for product in business.products %}<div class="p-4 border rounded-lg"><div class="flex justify-between items-start"><div><h3 class="text-xl font-bold">{{ product.name }}</h3><p class="text-sm text-gray-500">SKU: {{ product.sku }} | Price: ${{ "%.2f"|format(product.price) }}</p><p class="text-gray-600">{{ product.description }}</p><p class="font-semibold">Current Stock: {{ product.inventory.quantity if product.inventory else 0 }}</p><a href="{{ url_for('edit_product', product_id=product._id) }}" class="text-sm text-blue-500 hover:underline">Edit Product</a></div><div class="flex-shrink-0 space-y-2"><form action="{{ url_for('record_sale', product_id=product._id) }}" method="post" class="flex items-center gap-2"><input type="number" name="quantity_sold" value="1" min="1" class="w-16 p-1 border rounded-md"><button type="submit" class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-3 rounded-md text-sm">Sell</button></form><form action="{{ url_for('update_stock', product_id=product._id) }}" method="post" class="flex items-center gap-2"><input type="number" name="quantity" value="{{ product.inventory.quantity if product.inventory else 0 }}" min="0" class="w-16 p-1 border rounded-md"><button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-1 px-3 rounded-md text-sm">Set Stock</button></form></div></div></div>{% else %} <p>No products found for this business.</p> {% endfor %}</div></div></div></div>"""
-EDIT_PRODUCT_TEMPLATE = """<div class="max-w-lg mx-auto bg-white p-8 rounded-lg shadow-lg"><h1 class="text-2xl font-bold mb-6">Edit Product</h1><form method="post" class="space-y-4"><div><label for="name">Product Name</label><input type="text" name="name" value="{{ product.name }}" class="w-full p-2 border rounded-md mt-1" required></div><div><label for="sku">SKU</label><input type="text" name="sku" value="{{ product.sku }}" class="w-full p-2 border rounded-md mt-1" required></div><div><label for="description">Description</label><textarea name="description" class="w-full p-2 border rounded-md mt-1">{{ product.description }}</textarea></div><div><label for="image_url">Image URL</label><input type="url" name="image_url" value="{{ product.image_url or '' }}" placeholder="https://..." class="w-full p-2 border rounded-md mt-1"></div><div><label for="price">Price</label><input type="number" step="0.01" name="price" value="{{ product.price }}" class="w-full p-2 border rounded-md mt-1" required></div><div class="flex items-center gap-4"><button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Save Changes</button><a href="{{ url_for('business_details', business_id=product.business_id) }}" class="text-gray-600 hover:underline">Cancel</a></div></form></div>"""
-HOME_TEMPLATE = """<div class="bg-white p-6 rounded-lg shadow-lg"><h1 class="text-3xl font-bold mb-6">Welcome to StoreFront!</h1><h2 class="text-2xl font-semibold mb-4">Browse Our Businesses</h2><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{% for business in businesses %}<a href="{{ url_for('browse_business', business_id=business._id) }}" class="block p-6 bg-gray-50 hover:bg-gray-200 rounded-lg shadow-md transition"><h3 class="text-xl font-bold">{{ business.name }}</h3><p class="text-gray-600 capitalize">{{ business.business_type.replace('_', ' ') }}</p></a>{% else %}<p>No businesses are currently listed.</p>{% endfor %}</div></div>"""
-CART_TEMPLATE = """<div class="bg-white p-6 rounded-lg shadow-lg"><h1 class="text-3xl font-bold mb-6">Your Shopping Cart</h1>{% if not cart_items %}<p>Your cart is empty. <a href="{{ url_for('home') }}" class="text-blue-500 hover:underline">Start shopping!</a></p>{% else %}<div class="divide-y divide-gray-200">{% for item in cart_items %}<div class="py-4 flex flex-col sm:flex-row justify-between items-center"><div class="mb-4 sm:mb-0"><h2 class="text-lg font-bold">{{ item.product.name }}</h2><p class="text-gray-600">Price: ${{ "%.2f"|format(item.product.price) }}</p><p class="font-semibold">Subtotal: ${{ "%.2f"|format(item.subtotal) }}</p></div><div class="flex items-center gap-4"><form action="{{ url_for('update_cart', product_id=item.product._id) }}" method="post" class="flex items-center gap-2"><input type="number" name="quantity" value="{{ item.quantity }}" min="1" max="{{ item.product.inventory.quantity }}" class="w-20 p-2 border rounded-md"><button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-1 px-3 rounded-md">Update</button></form><a href="{{ url_for('remove_from_cart', product_id=item.product._id) }}" class="text-red-500 hover:underline">Remove</a></div></div>{% endfor %}</div><div class="mt-6 border-t pt-6 text-right"><h2 class="text-2xl font-bold">Total: ${{ "%.2f"|format(total) }}</h2><form action="{{ url_for('checkout') }}" method="post" class="mt-4"><button type="submit" class="bg-green-500 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-md text-lg">Proceed to Checkout</button></form></div>{% endif %}</div>"""
-LOGIN_TEMPLATE = """<div class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg"><h1 class="text-2xl font-bold mb-6 text-center">Login</h1><form action="{{ url_for('login') }}" method="post" class="space-y-4"><input type="text" name="username" placeholder="Username" class="w-full p-2 border rounded-md" required><input type="password" name="password" placeholder="Password" class="w-full p-2 border rounded-md" required><button type="submit" class="w-full bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Login</button></form><p class="text-center mt-4">Don't have an account? <a href="{{ url_for('register') }}" class="text-blue-500 hover:underline">Register here</a></p></div>"""
-REGISTER_TEMPLATE = """<div class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg"><h1 class="text-2xl font-bold mb-6 text-center">Register</h1><form action="{{ url_for('register') }}" method="post" class="space-y-4"><input type="text" name="username" placeholder="Username" class="w-full p-2 border rounded-md" required><input type="password" name="password" placeholder="Password" class="w-full p-2 border rounded-md" required><div><label class="block text-sm font-medium text-gray-700">Account Type</label><select name="role" class="w-full p-2 border rounded-md mt-1"><option value="buyer">Buyer (Browse Products)</option><option value="owner">Owner (Manage Businesses)</option></select></div><button type="submit" class="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">Register</button></form><p class="text-center mt-4">Already have an account? <a href="{{ url_for('login') }}" class="text-blue-500 hover:underline">Login here</a></p></div>"""
-ADMIN_DASHBOARD_TEMPLATE = """<div class="bg-white p-6 rounded-lg shadow-lg"><h1 class="text-3xl font-bold mb-4">Your Businesses</h1><div class="mb-6"><h2 class="text-2xl font-semibold mb-2">Add New Business</h2><form action="{{ url_for('add_business') }}" method="post" class="flex flex-col sm:flex-row gap-3"><input type="text" name="name" placeholder="Business Name" class="p-2 border rounded-md flex-grow" required><select name="business_type" class="p-2 border rounded-md" required><option value="" disabled selected>Select type...</option><option value="gym">Gym</option><option value="car_dealership">Car Dealership</option><option value="other">Other</option></select><button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Add Business</button></form></div><hr class="my-6"><div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">{% for business in businesses %}<div class="p-6 bg-gray-50 rounded-lg shadow-md"><a href="{{ url_for('business_details', business_id=business._id) }}"><h3 class="text-xl font-bold hover:text-blue-600">{{ business.name }}</h3></a><p class="text-gray-600 capitalize">{{ business.business_type.replace('_', ' ') }}</p><a href="{{ url_for('edit_business', business_id=business._id) }}" class="text-sm text-blue-500 hover:underline mt-2 inline-block">Edit Name</a></div>{% else %}<p>No businesses found. Add one above to get started!</p>{% endfor %}</div></div>"""
-EDIT_BUSINESS_TEMPLATE = """<div class="max-w-md mx-auto bg-white p-8 rounded-lg shadow-lg"><h1 class="text-2xl font-bold mb-6">Edit Business</h1><form method="post" class="space-y-4"><div><label for="name" class="block text-sm font-medium text-gray-700">Business Name</label><input type="text" name="name" id="name" value="{{ business.name }}" class="w-full p-2 border rounded-md mt-1" required></div><div class="flex items-center gap-4"><button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md">Save Changes</button><a href="{{ url_for('admin_dashboard') }}" class="text-gray-600 hover:underline">Cancel</a></div></form></div>"""
+# --- HTML TEMPLATES ---
 
+# Base layout
+LAYOUT_TEMPLATE = """
+<!doctype html>
+<html lang="{{ store.lang or 'en' }}" class="scroll-smooth">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>{{ store.name }}</title>
+</head>
+<body class="bg-gray-200 text-gray-900 flex flex-col min-h-screen">
+    <nav class="bg-gray-800 text-white shadow-lg sticky top-0 z-50">
+        <div class="container mx-auto px-6 py-3 flex justify-between items-center">
+            <a href="{{ url_for('home') }}" class="flex items-center space-x-3">
+                {% if store.logo_url %}<img src="{{ store.logo_url }}" alt="{{ store.name }} Logo" class="h-12">{% endif %}
+                <span class="text-2xl font-bold text-white tracking-wider">{{ store.name }}</span>
+            </a>
+            <div class="flex items-center space-x-4">
+                {% if store.lang == 'es' %}
+                    <a href="#specials" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Ofertas</a>
+                    <a href="#inventory" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Inventario</a>
+                    <a href="#about" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Sobre Nosotros</a>
+                {% else %}
+                    <a href="#specials" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Specials</a>
+                    <a href="#inventory" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">Inventory</a>
+                    <a href="#about" class="px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-700">About Us</a>
+                {% endif %}
+                {% if 'user_id' in session and session.get('store_id') == store._id|string %}
+                    <a href="{{ url_for('dashboard') }}" class="px-4 py-2 rounded-md text-sm font-medium bg-blue-600 hover:bg-blue-700">Dashboard</a>
+                    <a href="{{ url_for('logout') }}" class="px-4 py-2 rounded-md text-sm font-medium bg-red-600 hover:red-bg-700">Logout</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+    <main class="container mx-auto mt-8 p-6 flex-grow">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}{% for category, message in messages %}
+            <div class="p-4 mb-4 text-sm rounded-lg {{ 'bg-green-100 text-green-800' if category == 'success' else 'bg-red-100 text-red-800' }}" role="alert">
+                <span class="font-medium">{{ category.title() }}!</span> {{ message }}
+            </div>
+            {% endfor %}{% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="bg-gray-800 text-white mt-12 py-8">
+        <div class="container mx-auto px-6 text-center">
+            <p class="font-bold text-lg">{{ store.name }}</p>
+            <p class="text-gray-400 mt-2">{{ store.address }}</p>
+            <p class="text-gray-400 mt-1"><strong>{% if store.lang == 'es' %}Horarios{% else %}Hours{% endif %}:</strong> {{ store.hours }}</p>
+            <p class="text-gray-300 mt-4 text-sm">© {{ now.year }} {{ store.name }}. {% if store.lang == 'es' %}Todos los derechos reservados.{% else %}All Rights Reserved.{% endif %}</p>
+        </div>
+    </footer>
+</body>
+</html>
+"""
+
+# Home page
+HOME_TEMPLATE = """
+{% extends "layout" %}
+{% block content %}
+<section id="specials" class="pt-4 mb-16">
+    <div class="bg-white p-8 rounded-lg shadow-xl">
+        <div class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold mb-2 text-gray-800">{% if store.lang == 'es' %}Últimas Ofertas y Noticias{% else %}Latest Deals & News{% endif %}</h1>
+            <p class="text-gray-600">{% if store.lang == 'es' %}¡Vea nuestras ofertas actuales!{% else %}Check out our current specials!{% endif %}</p>
+        </div>
+        <div class="space-y-8">
+            {% for special in specials %}
+            <div class="flex flex-col md:flex-row gap-6 items-center {% if not loop.last %}border-b pb-8{% endif %}">
+                {% if special.image_url %}<div class="md:w-1/3 flex-shrink-0"><img src="{{ special.image_url }}" alt="{{ special.title }}" class="w-full h-48 object-cover rounded-lg shadow-md"></div>{% endif %}
+                <div class="{% if special.image_url %}md:w-2/3{% else %}w-full{% endif %}">
+                    <h2 class="text-2xl font-bold text-gray-800">{{ special.title }}</h2>
+                    <p class="text-sm text-gray-500 mb-3">{{ special.date_created.strftime('%B %d, %Y') }}</p>
+                    <p class="text-gray-700 whitespace-pre-wrap">{{ special.content }}</p>
+                </div>
+            </div>
+            {% else %}
+            <p class="col-span-full text-center text-gray-500">{% if store.lang == 'es' %}No hay ofertas especiales disponibles en este momento.{% else %}No specials are available at the moment.{% endif %}</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section id="inventory" class="pt-4">
+    <div class="bg-white p-8 rounded-lg shadow-xl">
+        <div class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold mb-2 text-gray-800">{% if store.lang == 'es' %}Nuestro Inventario{% else %}Our Inventory{% endif %}</h1>
+            <p class="text-gray-600">{{ store.tagline }}</p>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            {% for product in products %}
+            <div class="border rounded-lg overflow-hidden shadow-lg transition-transform transform hover:-translate-y-2 hover:shadow-2xl">
+                <a href="{{ url_for('product_details', product_id=product._id) }}"><img src="{{ product.image_url or 'https://placehold.co/600x400/cccccc/ffffff?text=Image+Not+Available' }}" alt="Image of {{ product.name }}" class="w-full h-56 object-cover"></a>
+                <div class="p-6">
+                    <h2 class="text-2xl font-bold text-gray-800">{{ product.name }}</h2>
+                    <p class="text-xl font-semibold text-green-600 mt-2">${{ "%.2f"|format(product.price) }}</p>
+                    {% set first_attr_key = product.attributes.keys()|first %}{% if first_attr_key %}<p class="text-gray-500 text-sm mt-1"><strong>{{ first_attr_key }}:</strong> {{ product.attributes[first_attr_key] }}</p>{% endif %}
+                    <a href="{{ url_for('product_details', product_id=product._id) }}" class="mt-4 inline-block w-full text-center bg-gray-800 hover:bg-green-600 hover:text-white text-white font-bold py-2 px-4 rounded-md transition-colors">{% if store.lang == 'es' %}Ver Detalles{% else %}View Details{% endif %}</a>
+                </div>
+            </div>
+            {% else %}
+            <p class="col-span-full text-center text-gray-500">{% if store.lang == 'es' %}No hay productos disponibles actualmente.{% else %}No products are currently available.{% endif %}</p>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+
+<section id="about" class="mt-16 pt-4">
+    <div class="bg-white p-8 rounded-lg shadow-xl">
+        <div class="text-center"><h2 class="text-3xl font-extrabold text-gray-800 mb-4">{% if store.lang == 'es' %}Sobre Nosotros{% else %}About Us{% endif %}</h2></div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center mt-6">
+            <div class="text-gray-700 leading-relaxed text-center md:text-left">
+                <h3 class="text-2xl font-bold text-gray-900 mb-2">{{ store.name }}</h3>
+                <p class="whitespace-pre-wrap">{{ store.about_text }}</p>
+            </div>
+            <div class="text-center md:text-left">
+                <h3 class="text-2xl font-bold text-gray-900 mb-2">{% if store.lang == 'es' %}Visítanos{% else %}Visit Us{% endif %}</h3>
+                <p>{{ store.address }}</p>
+                <p class="mt-4"><strong>{% if store.lang == 'es' %}Horarios{% else %}Hours{% endif %}:</strong><br>{{ store.hours }}</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{% if store.google_maps_embed_html %}
+<section id="location" class="mt-16">
+    <div class="bg-white rounded-lg shadow-xl overflow-hidden">
+        {{ store.google_maps_embed_html | safe }}
+    </div>
+</section>
+{% endif %}
+{% endblock %}
+"""
+
+# Product details page
+PRODUCT_DETAILS_TEMPLATE = """
+{% extends "layout" %}
+{% block content %}
+<div class="bg-white p-8 rounded-lg shadow-xl">
+    <a href="{{ url_for('home') }}#inventory" class="text-green-600 font-semibold hover:underline mb-6 inline-block">← {% if store.lang == 'es' %}Volver al Inventario{% else %}Back to Inventory{% endif %}</a>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div><img src="{{ product.image_url or 'https://placehold.co/600x400/cccccc/ffffff?text=Image+Not+Available' }}" alt="Image of {{ product.name }}" class="w-full h-auto object-cover rounded-lg shadow-md"></div>
+        <div>
+            <h1 class="text-4xl font-extrabold text-gray-800">{{ product.name }}</h1>
+            <p class="text-3xl font-bold text-green-600 mt-4">${{ "%.2f"|format(product.price) }}</p>
+            <div class="mt-6 border-t pt-6">
+                <h2 class="text-xl font-semibold mb-3">{% if store.lang == 'es' %}Detalles del Producto{% else %}Product Details{% endif %}</h2>
+                <ul class="space-y-2 text-gray-700">
+                    <li><strong>SKU:</strong> {{ product.sku }}</li>
+                    {% for key, value in product.attributes.items() %}
+                    <li><strong>{{ key }}:</strong> {{ value }}</li>
+                    {% endfor %}
+                    <li><strong>{% if store.lang == 'es' %}Estado{% else %}Status{% endif %}:</strong> <span class="font-semibold px-2 py-1 rounded-full {{ 'bg-green-100 text-green-800' if product.status == 'Available' else 'bg-red-100 text-red-800' }}">{{ product.status }}</span></li>
+                </ul>
+            </div>
+            <div class="mt-6 border-t pt-6">
+                 <h2 class="text-xl font-semibold mb-3">{% if store.lang == 'es' %}Descripción{% else %}Description{% endif %}</h2>
+                 <p class="text-gray-600 whitespace-pre-wrap">{{ product.description or 'No description provided.' }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+"""
+
+# Admin templates (kept in English for simplicity)
+DASHBOARD_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="flex justify-between items-center mb-6"><h1 class="text-4xl font-extrabold text-gray-800">Main Dashboard</h1></div><div class="grid grid-cols-1 md:grid-cols-2 gap-8"><div class="bg-white p-6 rounded-lg shadow-xl"><h2 class="text-2xl font-bold mb-4">Inventory Management</h2><p class="text-gray-600 mb-4">Add, edit, or remove products from your store's inventory.</p><a href="{{ url_for('list_products') }}" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md">Manage Products</a></div><div class="bg-white p-6 rounded-lg shadow-xl"><h2 class="text-2xl font-bold mb-4">Specials & Announcements</h2><p class="text-gray-600 mb-4">Create or update posts for your customers to see on the homepage.</p><a href="{{ url_for('list_specials') }}" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md">Manage Specials</a></div></div>{% endblock %}"""
+PRODUCT_DASHBOARD_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="flex justify-between items-center mb-6"><h1 class="text-4xl font-extrabold text-gray-800">Inventory Dashboard</h1><div><a href="{{ url_for('dashboard') }}" class="text-gray-600 hover:underline mr-4">← Back to Main Dashboard</a><a href="{{ url_for('add_product') }}" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md shadow-lg">+ Add New Product</a></div></div><div class="bg-white p-8 rounded-lg shadow-xl overflow-x-auto"><table class="w-full text-left"><thead class="bg-gray-50 border-b-2 border-gray-200"><tr><th class="p-4">Product Name</th><th class="p-4">SKU</th><th class="p-4">Price</th><th class="p-4">Status</th><th class="p-4 text-center">Actions</th></tr></thead><tbody>{% for product in products %}<tr class="border-b hover:bg-gray-50"><td class="p-4 font-medium">{{ product.name }}</td><td class="p-4 text-gray-600">{{ product.sku }}</td><td class="p-4 text-gray-600">${{ "%.2f"|format(product.price) }}</td><td class="p-4"><span class="font-semibold px-2 py-1 text-xs rounded-full {{ 'bg-green-100 text-green-800' if product.status == 'Available' else 'bg-red-100 text-red-800' }}">{{ product.status }}</span></td><td class="p-4 text-center space-x-2"><a href="{{ url_for('edit_product', product_id=product._id) }}" class="text-blue-600 hover:underline">Edit</a><form action="{{ url_for('mark_as_sold', product_id=product._id) }}" method="post" class="inline"><button type="submit" class="text-green-600 hover:underline">Mark Sold</button></form><form action="{{ url_for('delete_product', product_id=product._id) }}" method="post" class="inline" onsubmit="return confirm('Delete this product permanently?');"><button type="submit" class="text-red-600 hover:underline">Delete</button></form></td></tr>{% else %}<tr><td colspan="5" class="text-center p-6 text-gray-500">No products found. Add one to get started!</td></tr>{% endfor %}</tbody></table></div>{% endblock %}"""
+PRODUCT_FORM_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-xl"><h1 class="text-3xl font-bold mb-6 text-gray-800">{{ 'Edit Product' if product else 'Add New Product' }}</h1><form method="post" class="space-y-6"><div class="p-4 bg-gray-50 rounded-lg"><h2 class="text-lg font-semibold text-gray-700 mb-2">Core Details</h2><div><label for="name" class="block text-sm font-medium text-gray-700">Product Name</label><input type="text" name="name" value="{{ product.name or '' }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4"><div><label for="sku" class="block text-sm font-medium text-gray-700">SKU (Unique ID)</label><input type="text" name="sku" value="{{ product.sku or '' }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="price" class="block text-sm font-medium text-gray-700">Price ($)</label><input type="number" step="0.01" name="price" value="{{ product.price or '' }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div></div></div><div class="p-4 bg-gray-50 rounded-lg"><h2 class="text-lg font-semibold text-gray-700 mb-2">Custom Attributes</h2>{% for attr in store.product_attributes_template %}<div class="mt-4"><label for="attr_{{ attr.name }}" class="block text-sm font-medium text-gray-700">{{ attr.name }}</label>{% if attr.type == 'textarea' %}<textarea name="attr_{{ attr.name }}" rows="3" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">{{ product.attributes.get(attr.name, '') }}</textarea>{% else %}<input type="{{ attr.type }}" name="attr_{{ attr.name }}" value="{{ product.attributes.get(attr.name, '') }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" {% if attr.required %}required{% endif %}>{% endif %}</div>{% endfor %}</div><div class="p-4 bg-gray-50 rounded-lg"><h2 class="text-lg font-semibold text-gray-700 mb-2">Additional Information</h2><div class="mt-4"><label for="image_url" class="block text-sm font-medium text-gray-700">Image URL</label><input type="url" name="image_url" value="{{ product.image_url or '' }}" placeholder="https://..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></div><div class="mt-4"><label for="description" class="block text-sm font-medium text-gray-700">Description</label><textarea name="description" rows="4" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md">{{ product.description or '' }}</textarea></div></div><div class="flex items-center justify-end gap-4 pt-4 border-t"><a href="{{ url_for('list_products') }}" class="text-gray-600 hover:underline">Cancel</a><button type="submit" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md">{{ 'Save Changes' if product else 'Add Product' }}</button></div></form></div>{% endblock %}"""
+SPECIALS_DASHBOARD_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="flex justify-between items-center mb-6"><h1 class="text-4xl font-extrabold text-gray-800">Specials & Announcements</h1><div><a href="{{ url_for('dashboard') }}" class="text-gray-600 hover:underline mr-4">← Back to Main Dashboard</a><a href="{{ url_for('add_special') }}" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md shadow-lg">+ Add New Special</a></div></div><div class="bg-white p-8 rounded-lg shadow-xl">{% for special in specials %}<div class="flex items-start gap-4 {% if not loop.last %}border-b pb-4 mb-4{% endif %}">{% if special.image_url %}<img src="{{ special.image_url }}" class="w-24 h-24 object-cover rounded-md">{% endif %}<div class="flex-grow"><h2 class="text-xl font-bold">{{ special.title }}</h2><p class="text-sm text-gray-500">{{ special.date_created.strftime('%B %d, %Y') }}</p><p class="text-gray-600 mt-2">{{ special.content|truncate(150) }}</p></div><div class="flex-shrink-0 flex flex-col space-y-2"><a href="{{ url_for('edit_special', special_id=special._id) }}" class="text-blue-600 hover:underline">Edit</a><form action="{{ url_for('delete_special', special_id=special._id) }}" method="post" onsubmit="return confirm('Delete this special?');"><button type="submit" class="text-red-600 hover:underline">Delete</button></form></div></div>{% else %}<p class="text-center text-gray-500">No specials found. Add one to get started!</p>{% endfor %}</div>{% endblock %}"""
+SPECIAL_FORM_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="max-w-2xl mx-auto bg-white p-8 rounded-lg shadow-xl"><h1 class="text-3xl font-bold mb-6 text-gray-800">{{ 'Edit Special' if special else 'Add New Special' }}</h1><form method="post" class="space-y-6"><div><label for="title" class="block text-sm font-medium text-gray-700">Title</label><input type="text" name="title" value="{{ special.title or '' }}" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="content" class="block text-sm font-medium text-gray-700">Content</label><textarea name="content" rows="6" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required>{{ special.content or '' }}</textarea></div><div><label for="image_url" class="block text-sm font-medium text-gray-700">Image URL (Optional)</label><input type="url" name="image_url" value="{{ special.image_url or '' }}" placeholder="https://..." class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md"></div><div class="flex items-center justify-end gap-4 pt-4 border-t"><a href="{{ url_for('list_specials') }}" class="text-gray-600 hover:underline">Cancel</a><button type="submit" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-md">{{ 'Save Changes' if special else 'Create Special' }}</button></div></form></div>{% endblock %}"""
+LOGIN_TEMPLATE = """{% extends "layout" %}{% block content %}<div class="max-w-md mx-auto bg-white p-8 mt-10 rounded-lg shadow-xl"><h1 class="text-3xl font-bold mb-6 text-center text-gray-800">Owner Login for {{ store.name }}</h1><form method="post" class="space-y-4"><div><label for="email" class="block text-sm font-medium text-gray-700">Email</label><input type="email" name="email" id="email" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div><div><label for="password" class="block text-sm font-medium text-gray-700">Password</label><input type="password" name="password" id="password" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md" required></div><button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-800 hover:bg-green-600">Sign In</button></form></div>{% endblock %}"""
 
 # --- Helper Functions & Decorators ---
 def render_page(template_string, **context):
-    return render_template_string(LAYOUT_TEMPLATE.replace("{% block content %}{% endblock %}", template_string), **context)
+    """Renders a page by injecting its content into the base layout."""
+    context['now'] = datetime.datetime.utcnow()
+    context['store'] = g.store
+    if '{% extends "layout" %}' in template_string:
+        content_block = template_string.split('{% extends "layout" %}', 1)[-1]
+    else:
+        content_block = template_string
+    full_html = LAYOUT_TEMPLATE.replace("{% block content %}{% endblock %}", content_block)
+    return render_template_string(full_html, **context)
 
 def owner_required(f):
+    """Decorator to ensure a route is accessed only by the logged-in store owner."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session or session.get('user_role') != 'owner':
-            flash('You do not have permission to access this page.', 'error'); return redirect(url_for('home'))
+        if not g.store: abort(404)
+        if ('user_id' not in session or 'store_id' not in session or 
+            session['store_id'] != str(g.store['_id'])):
+            flash('You must be logged in as the owner to view this page.', 'error')
+            return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
-def buyer_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session or session.get('user_role') != 'buyer':
-            flash('Only buyers can perform this action.', 'error'); return redirect(url_for('home'))
-        return f(*args, **kwargs)
-    return decorated_function
+# --- (STEP 2) SEEDING FUNCTION: CUSTOMIZE YOUR STORE'S DATA HERE ---
+def seed_database():
+    """
+    Populates the database with the store's initial data if it doesn't exist.
+    THIS IS THE PRIMARY AREA TO CUSTOMIZE FOR YOUR STORE.
+    """
+    if not db.stores.find_one({"slug_id": STORE_SLUG_ID}):
+        print(f"Store '{STORE_SLUG_ID}' not found. Seeding database...")
+        
+        # --- Store Information ---
+        store_data = {
+            "name": "My Awesome Store",
+            "slug_id": STORE_SLUG_ID,
+            "lang": "en", # 'en' for English, 'es' for Spanish
+            "logo_url": None, # e.g., "https://i.imgur.com/your-logo.png"
+            "address": "123 Main Street, Anytown, USA 12345",
+            "google_maps_embed_html": None, # Paste your full Google Maps iframe code here
+            "hours": "Monday to Friday: 9am - 5pm\nSaturday: 10am - 3pm",
+            "tagline": "Your one-stop shop for amazing things.",
+            "about_text": "Welcome to our store! We are passionate about providing the highest quality products and the best customer service. Our journey started in a small garage and has grown into what it is today, all thanks to customers like you.",
+            
+            # --- Define Custom Product Fields for the Admin Form ---
+            "product_attributes_template": [
+                {"name": "Color", "type": "text", "required": True},
+                {"name": "Size", "type": "text", "required": False},
+                {"name": "Material", "type": "text", "required": False},
+                {"name": "Specifications", "type": "textarea", "required": False}
+            ]
+        }
+        store_id = db.stores.insert_one(store_data).inserted_id
 
-def _get_business_with_products(business_id_str):
-    try:
-        business_oid = ObjectId(business_id_str)
-    except InvalidId:
-        return None
-    
-    business = db.businesses.find_one({"_id": business_oid})
-    if not business:
-        return None
+        # --- Store Owner Login ---
+        db.users.insert_one({
+            "email": "owner@example.com", 
+            "password": "password123", 
+            "role": "owner", 
+            "store_id": store_id
+        })
 
-    # Efficiently fetch products and their inventory using an aggregation pipeline
-    pipeline = [
-        { "$match": { "business_id": business_oid } },
-        {
-            "$lookup": {
-                "from": "inventory",
-                "localField": "_id",
-                "foreignField": "product_id",
-                "as": "inventory_docs"
+        # --- Initial Product Inventory ---
+        db.products.insert_many([
+            {
+                "name": "Deluxe Widget",
+                "sku": "WIDGET-001",
+                "price": 19.99,
+                "description": "A high-quality widget designed for excellence. Features a durable chassis and a sleek, modern design.",
+                "image_url": "https://placehold.co/600x400/2d3748/ffffff?text=Deluxe+Widget",
+                "status": "Available",
+                "store_id": store_id,
+                "date_added": datetime.datetime.utcnow(),
+                "attributes": {"Color": "Red", "Size": "Large", "Material": "Stainless Steel", "Specifications": "- 5.5 inch display\n- 12-hour battery life"}
+            },
+            {
+                "name": "Standard Gadget",
+                "sku": "GADGET-A5",
+                "price": 9.95,
+                "description": "A reliable and affordable gadget for everyday use. Perfect for simple tasks.",
+                "image_url": "https://placehold.co/600x400/4a5568/ffffff?text=Standard+Gadget",
+                "status": "Available",
+                "store_id": store_id,
+                "date_added": datetime.datetime.utcnow(),
+                "attributes": {"Color": "Blue", "Size": "Medium", "Material": "Plastic"}
             }
-        },
-        {
-            "$addFields": {
-                "inventory": { "$arrayElemAt": [ "$inventory_docs", 0 ] }
-            }
-        },
-        { "$project": { "inventory_docs": 0 } } # Clean up the output
-    ]
-    products = list(db.products.aggregate(pipeline))
-    business['products'] = sorted(products, key=lambda p: p['name'])
-    return business
+        ])
 
+        # --- Initial Specials/Announcements ---
+        db.specials.insert_one({
+            "title": "Grand Opening Sale!",
+            "content": "To celebrate our grand opening, get 10% off all items this week! Come visit us at our new location on Main Street.",
+            "image_url": "https://placehold.co/800x400/a0aec0/ffffff?text=Grand+Opening!",
+            "date_created": datetime.datetime.utcnow(),
+            "store_id": store_id
+        })
+        print("Database seeding complete.")
 
-# --- Auth Routes ---
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username, password, role = request.form.get('username'), request.form.get('password'), request.form.get('role')
-        if db.users.find_one({"username": username}):
-            flash('Username already exists.', 'error'); return redirect(url_for('register'))
-        # NOTE: Passwords should be hashed in a real application!
-        db.users.insert_one({"username": username, "password": password, "role": role})
-        flash('Registration successful! Please log in.', 'success'); return redirect(url_for('login'))
-    return render_page(REGISTER_TEMPLATE)
+# --- Global & Pre-Request Logic ---
+@app.before_request
+def load_store():
+    """Load the store object from the database before each request."""
+    g.store = db.stores.find_one({"slug_id": STORE_SLUG_ID})
+    if not g.store:
+        abort(500, description=f"Store with slug_id '{STORE_SLUG_ID}' not found in the database. Please run the seed function.")
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        username, password = request.form.get('username'), request.form.get('password')
-        user = db.users.find_one({"username": username, "password": password})
-        if user:
-            session.update({'user_id': str(user['_id']), 'username': user['username'], 'user_role': user['role']})
-            flash(f'Welcome back, {user["username"]}!', 'success')
-            return redirect(url_for('admin_dashboard') if user['role'] == 'owner' else url_for('home'))
-        else:
-            flash('Invalid username or password.', 'error'); return redirect(url_for('login'))
-    return render_page(LOGIN_TEMPLATE)
-
-@app.route('/logout')
-def logout():
-    session.clear(); flash('You have been logged out.', 'success'); return redirect(url_for('home'))
-
-# --- Public & Buyer Routes ---
+# --- Public Store Routes ---
 @app.route('/')
 def home():
-    businesses = list(db.businesses.find())
-    return render_page(HOME_TEMPLATE, businesses=businesses)
+    """Display the store's homepage."""
+    products = list(db.products.find({"status": "Available", "store_id": g.store['_id']}).sort("date_added", -1))
+    specials = list(db.specials.find({"store_id": g.store['_id']}).sort("date_created", -1))
+    return render_page(HOME_TEMPLATE, products=products, specials=specials)
 
-@app.route('/browse/business/<string:business_id>')
-def browse_business(business_id):
-    business = _get_business_with_products(business_id)
-    if not business:
-        flash('Business not found.', 'error'); return redirect(url_for('home'))
-    return render_page(BROWSE_BUSINESS_TEMPLATE, business=business)
-
-# --- Cart & Checkout Routes ---
-@app.before_request
-def initialize_cart():
-    if 'cart' not in session: session['cart'] = {}
-
-@app.route('/cart/add/<string:product_id>', methods=['POST'])
-@buyer_required
-def add_to_cart(product_id):
+@app.route('/product/<string:product_id>')
+def product_details(product_id):
+    """Display details for a single product."""
     try:
-        product_oid = ObjectId(product_id)
+        product = db.products.find_one({"_id": ObjectId(product_id), "store_id": g.store['_id']})
+        if not product:
+            flash('Product not found.', 'error')
+            return redirect(url_for('home'))
+        return render_page(PRODUCT_DETAILS_TEMPLATE, product=product)
     except InvalidId:
-        flash("Invalid product.", "error"); return redirect(request.referrer)
-        
-    product = db.products.find_one({"_id": product_oid})
-    if not product:
-        flash("Product not found.", "error"); return redirect(request.referrer)
-    
-    quantity = request.form.get('quantity', 1, type=int)
-    cart = session.get('cart', {})
-    current_qty = cart.get(product_id, 0)
-    
-    inventory = db.inventory.find_one({"product_id": product_oid})
-    if not inventory or inventory['quantity'] < current_qty + quantity:
-        flash(f"Not enough stock for {product['name']}.", "error"); return redirect(request.referrer)
-        
-    cart[product_id] = current_qty + quantity
-    session.modified = True
-    flash(f"Added {quantity} x {product['name']} to your cart.", "success")
-    return redirect(request.referrer)
+        flash('Invalid product ID.', 'error')
+        return redirect(url_for('home'))
 
-@app.route('/cart')
-@buyer_required
-def view_cart():
-    cart = session.get('cart', {})
-    cart_items, total_price = [], 0
-    
-    product_ids_to_fetch = [ObjectId(pid) for pid in cart.keys()]
-    if not product_ids_to_fetch:
-        return render_page(CART_TEMPLATE, cart_items=[], total=0)
-
-    pipeline = [
-        {"$match": {"_id": {"$in": product_ids_to_fetch}}},
-        {"$lookup": {"from": "inventory", "localField": "_id", "foreignField": "product_id", "as": "inv"}},
-        {"$addFields": {"inventory": {"$arrayElemAt": ["$inv", 0]}}}
-    ]
-    products_in_cart = {str(p['_id']): p for p in db.products.aggregate(pipeline)}
-    
-    for pid_str, quantity in cart.items():
-        product = products_in_cart.get(pid_str)
-        if product:
-            subtotal = product['price'] * quantity
-            total_price += subtotal
-            cart_items.append({"product": product, "quantity": quantity, "subtotal": subtotal})
-    
-    return render_page(CART_TEMPLATE, cart_items=cart_items, total=total_price)
-
-@app.route('/cart/checkout', methods=['POST'])
-@buyer_required
-def checkout():
-    cart = session.get('cart', {})
-    if not cart: flash("Your cart is empty.", "error"); return redirect(url_for('view_cart'))
-
-    for pid_str, qty in cart.items():
-        try: product_oid = ObjectId(pid_str)
-        except InvalidId: continue
-        inventory = db.inventory.find_one({"product_id": product_oid})
-        if not inventory or inventory['quantity'] < qty:
-            product = db.products.find_one({"_id": product_oid})
-            flash(f"Checkout failed. Not enough stock for {product['name'] if product else 'a product'}.", "error")
-            return redirect(url_for('view_cart'))
-    
-    for pid_str, qty in cart.items():
-        product_oid = ObjectId(pid_str)
-        product = db.products.find_one({"_id": product_oid})
-        db.inventory.update_one({"product_id": product_oid}, {"$inc": {"quantity": -qty}})
-        db.sales.insert_one({
-            "product_id": product_oid, "quantity_sold": qty,
-            "total_price": product['price'] * qty, "sale_date": datetime.datetime.utcnow()
+# --- Admin Routes ---
+@app.route('/admin/login', methods=['GET', 'POST'])
+def login():
+    """Handle store owner login."""
+    if request.method == 'POST':
+        user = db.users.find_one({
+            "email": request.form.get('email'), 
+            "password": request.form.get('password'), 
+            "store_id": g.store['_id']
         })
-    session['cart'] = {}; session.modified = True
-    flash("Thank you for your purchase! Your order has been placed.", "success"); return redirect(url_for('home'))
+        if user:
+            session['user_id'] = str(user['_id'])
+            session['store_id'] = str(user['store_id'])
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid email or password.', 'error')
+    return render_page(LOGIN_TEMPLATE)
 
-# --- Owner Management Routes ---
-@app.route('/dashboard')
+@app.route('/admin/logout')
+def logout():
+    """Log the user out."""
+    session.clear()
+    flash('You have been successfully logged out.', 'success')
+    return redirect(url_for('home'))
+
+@app.route('/admin/dashboard')
 @owner_required
-def admin_dashboard():
-    owner_oid = ObjectId(session['user_id'])
-    businesses = list(db.businesses.find({"owner_id": owner_oid}))
-    return render_page(ADMIN_DASHBOARD_TEMPLATE, businesses=businesses)
+def dashboard():
+    """Display the main admin dashboard."""
+    return render_page(DASHBOARD_TEMPLATE)
 
-@app.route('/business/<string:business_id>')
+# Admin Product Routes
+@app.route('/admin/products')
 @owner_required
-def business_details(business_id):
-    business = _get_business_with_products(business_id)
-    if not business or str(business['owner_id']) != session['user_id']:
-        flash('Business not found or permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-    return render_page(BUSINESS_DETAILS_TEMPLATE, business=business)
+def list_products():
+    """List all products."""
+    products = list(db.products.find({"store_id": g.store['_id']}).sort([("status", 1), ("name", 1)]))
+    return render_page(PRODUCT_DASHBOARD_TEMPLATE, products=products)
 
-@app.route('/product/add/<string:business_id>', methods=['POST'])
+@app.route('/admin/product/add', methods=['GET', 'POST'])
 @owner_required
-def add_product(business_id):
-    try: business_oid = ObjectId(business_id)
-    except InvalidId: flash('Invalid business.', 'error'); return redirect(url_for('admin_dashboard'))
-    
-    business = db.businesses.find_one({"_id": business_oid})
-    if not business or str(business['owner_id']) != session['user_id']:
-        flash('Permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-    
-    form = request.form
-    sku = form.get('sku')
-    if db.products.find_one({"sku": sku}):
-        flash(f"Product with SKU '{sku}' already exists.", 'error')
-        return redirect(url_for('business_details', business_id=business_id))
-    
-    new_product = {
-        "name": form.get('name'), "sku": sku, "business_id": business_oid,
-        "description": form.get('description'), "image_url": form.get('image_url') or "",
-        "price": form.get('price', type=float)
-    }
-    result = db.products.insert_one(new_product)
-    
-    db.inventory.insert_one({
-        "product_id": result.inserted_id,
-        "quantity": form.get('initial_quantity', 0, type=int)
-    })
-    
-    flash('Product added successfully!', 'success')
-    return redirect(url_for('business_details', business_id=business_id))
-
-@app.route('/product/stock/update/<string:product_id>', methods=['POST'])
-@owner_required
-def update_stock(product_id):
-    try: product_oid = ObjectId(product_id)
-    except InvalidId: flash("Invalid product.", "error"); return redirect(url_for('admin_dashboard'))
-    
-    new_quantity = request.form.get('quantity', -1, type=int)
-    if new_quantity < 0:
-        flash('Invalid quantity provided.', 'error'); return redirect(request.referrer)
-    
-    # Verify owner has permission
-    product = db.products.find_one({"_id": product_oid})
-    business = db.businesses.find_one({"_id": product['business_id']})
-    if str(business['owner_id']) != session['user_id']:
-        flash('Permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-
-    db.inventory.update_one(
-        {"product_id": product_oid},
-        {"$set": {"quantity": new_quantity}},
-        upsert=True # Create inventory doc if it doesn't exist
-    )
-    flash(f"Stock for '{product['name']}' updated.", 'success')
-    return redirect(url_for('business_details', business_id=str(product['business_id'])))
-
-@app.route('/product/edit/<string:product_id>', methods=['GET', 'POST'])
-@owner_required
-def edit_product(product_id):
-    try: product_oid = ObjectId(product_id)
-    except InvalidId: flash("Invalid product.", "error"); return redirect(url_for('admin_dashboard'))
-
-    product = db.products.find_one({"_id": product_oid})
-    if not product:
-        flash('Product not found.', 'error'); return redirect(url_for('admin_dashboard'))
-
-    business = db.businesses.find_one({"_id": product['business_id']})
-    if str(business['owner_id']) != session['user_id']:
-        flash('Permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-
+def add_product():
+    """Handle adding a new product."""
     if request.method == 'POST':
         form = request.form
-        update_data = {
-            "name": form.get('name'), "sku": form.get('sku'),
-            "description": form.get('description'), "price": form.get('price', type=float),
-            "image_url": form.get('image_url') or ""
+        attributes = {attr['name']: form.get(f"attr_{attr['name']}") for attr in g.store['product_attributes_template']}
+        new_product = {
+            "name": form.get('name'), "sku": form.get('sku').upper(), "price": form.get('price', type=float),
+            "image_url": form.get('image_url') or None, "description": form.get('description'),
+            "status": "Available", "store_id": g.store['_id'], "date_added": datetime.datetime.utcnow(),
+            "attributes": attributes
         }
-        db.products.update_one({"_id": product_oid}, {"$set": update_data})
-        flash('Product updated successfully!', 'success')
-        return redirect(url_for('business_details', business_id=str(product['business_id'])))
-    
-    return render_page(EDIT_PRODUCT_TEMPLATE, product=product)
+        try:
+            db.products.insert_one(new_product)
+            flash(f"Product '{new_product['name']}' added successfully!", 'success')
+            return redirect(url_for('list_products'))
+        except DuplicateKeyError:
+            flash(f"Error: A product with SKU '{new_product['sku']}' already exists.", 'error')
+            return render_page(PRODUCT_FORM_TEMPLATE, product=new_product)
+    return render_page(PRODUCT_FORM_TEMPLATE, product=None)
 
-# Other routes like update_cart, remove_from_cart, record_sale, edit_business
-# are simple adaptations and are omitted here for brevity but follow the same MongoDB logic.
-# The provided code snippet is a fully functional representation.
-@app.route('/cart/update/<string:product_id>', methods=['POST'])
-@buyer_required
-def update_cart(product_id):
-    quantity = request.form.get('quantity', 0, type=int)
-    if quantity < 1: return remove_from_cart(product_id)
-    cart = session.get('cart', {})
-    cart[product_id] = quantity; session.modified = True
-    flash("Cart updated.", "success"); return redirect(url_for('view_cart'))
-
-@app.route('/cart/remove/<string:product_id>')
-@buyer_required
-def remove_from_cart(product_id):
-    cart = session.get('cart', {}); cart.pop(product_id, None); session.modified = True
-    flash("Item removed from cart.", "success"); return redirect(url_for('view_cart'))
-    
-@app.route('/business/edit/<string:business_id>', methods=['GET', 'POST'])
+@app.route('/admin/product/edit/<string:product_id>', methods=['GET', 'POST'])
 @owner_required
-def edit_business(business_id):
-    try: business_oid = ObjectId(business_id)
-    except InvalidId: flash("Invalid business.", "error"); return redirect(url_for('admin_dashboard'))
-    
-    business = db.businesses.find_one({"_id": business_oid})
-    if not business or str(business['owner_id']) != session['user_id']:
-        flash('Permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-        
+def edit_product(product_id):
+    """Handle editing an existing product."""
+    try:
+        product = db.products.find_one({"_id": ObjectId(product_id), "store_id": g.store['_id']})
+        if not product: return redirect(url_for('list_products'))
+        if request.method == 'POST':
+            form = request.form
+            attributes = {attr['name']: form.get(f"attr_{attr['name']}") for attr in g.store['product_attributes_template']}
+            update_data = {
+                "name": form.get('name'), "sku": form.get('sku').upper(), "price": form.get('price', type=float),
+                "image_url": form.get('image_url') or None, "description": form.get('description'), 
+                "attributes": attributes
+            }
+            try:
+                db.products.update_one({"_id": ObjectId(product_id)}, {"$set": update_data})
+                flash('Product updated successfully!', 'success')
+                return redirect(url_for('list_products'))
+            except DuplicateKeyError:
+                flash(f"Error: A product with SKU '{update_data['sku']}' already exists.", 'error')
+                product.update(update_data)
+                return render_page(PRODUCT_FORM_TEMPLATE, product=product)
+        return render_page(PRODUCT_FORM_TEMPLATE, product=product)
+    except InvalidId:
+        return redirect(url_for('list_products'))
+
+@app.route('/admin/product/sell/<string:product_id>', methods=['POST'])
+@owner_required
+def mark_as_sold(product_id):
+    """Mark a product as Sold."""
+    try:
+        db.products.update_one({"_id": ObjectId(product_id), "store_id": g.store['_id']}, {"$set": {"status": "Sold"}})
+    except InvalidId: pass
+    return redirect(url_for('list_products'))
+
+@app.route('/admin/product/delete/<string:product_id>', methods=['POST'])
+@owner_required
+def delete_product(product_id):
+    """Permanently delete a product."""
+    try:
+        db.products.delete_one({"_id": ObjectId(product_id), "store_id": g.store['_id']})
+    except InvalidId: pass
+    return redirect(url_for('list_products'))
+
+# Admin Specials Routes
+@app.route('/admin/specials')
+@owner_required
+def list_specials():
+    """List all specials/announcements."""
+    specials = list(db.specials.find({"store_id": g.store['_id']}).sort("date_created", -1))
+    return render_page(SPECIALS_DASHBOARD_TEMPLATE, specials=specials)
+
+@app.route('/admin/specials/add', methods=['GET', 'POST'])
+@owner_required
+def add_special():
+    """Handle adding a new special."""
     if request.method == 'POST':
-        new_name = request.form.get('name')
-        if new_name:
-            db.businesses.update_one({"_id": business_oid}, {"$set": {"name": new_name}})
-            flash('Business name updated successfully!', 'success'); return redirect(url_for('admin_dashboard'))
-        else: flash('Business name cannot be empty.', 'error')
-    return render_page(EDIT_BUSINESS_TEMPLATE, business=business)
-
-@app.route('/sale/record/<string:product_id>', methods=['POST'])
-@owner_required
-def record_sale(product_id):
-    try: product_oid = ObjectId(product_id)
-    except InvalidId: flash("Invalid product.", "error"); return redirect(url_for('admin_dashboard'))
-    
-    product = db.products.find_one({"_id": product_oid})
-    business = db.businesses.find_one({"_id": product['business_id']})
-    if str(business['owner_id']) != session['user_id']:
-        flash('Permission denied.', 'error'); return redirect(url_for('admin_dashboard'))
-
-    quantity_sold = request.form.get('quantity_sold', 0, type=int)
-    inventory = db.inventory.find_one({"product_id": product_oid})
-    if quantity_sold <= 0: flash('Please enter a valid quantity.', 'error')
-    elif not inventory or inventory['quantity'] < quantity_sold: flash('Not enough stock.', 'error')
-    else:
-        db.inventory.update_one({"product_id": product_oid}, {"$inc": {"quantity": -quantity_sold}})
-        db.sales.insert_one({
-            "product_id": product_oid, "quantity_sold": quantity_sold,
-            "total_price": product['price'] * quantity_sold, "sale_date": datetime.datetime.utcnow()
+        form = request.form
+        db.specials.insert_one({
+            "title": form.get('title'), "content": form.get('content'), 
+            "image_url": form.get('image_url') or None,
+            "date_created": datetime.datetime.utcnow(), "store_id": g.store['_id']
         })
-        flash('Sale recorded successfully!', 'success')
-    return redirect(url_for('business_details', business_id=str(product['business_id'])))
+        flash('New special created!', 'success')
+        return redirect(url_for('list_specials'))
+    return render_page(SPECIAL_FORM_TEMPLATE, special=None)
 
-# --- Main Entry Point ---
+@app.route('/admin/specials/edit/<string:special_id>', methods=['GET', 'POST'])
+@owner_required
+def edit_special(special_id):
+    """Handle editing an existing special."""
+    try:
+        special = db.specials.find_one({"_id": ObjectId(special_id), "store_id": g.store['_id']})
+        if not special: return redirect(url_for('list_specials'))
+        if request.method == 'POST':
+            form = request.form
+            db.specials.update_one({"_id": ObjectId(special_id)}, {"$set": {
+                "title": form.get('title'), "content": form.get('content'), 
+                "image_url": form.get('image_url') or None
+            }})
+            flash('Special updated!', 'success')
+            return redirect(url_for('list_specials'))
+        return render_page(SPECIAL_FORM_TEMPLATE, special=special)
+    except InvalidId:
+        return redirect(url_for('list_specials'))
+
+@app.route('/admin/specials/delete/<string:special_id>', methods=['POST'])
+@owner_required
+def delete_special(special_id):
+    """Permanently delete a special."""
+    try:
+        db.specials.delete_one({"_id": ObjectId(special_id), "store_id": g.store['_id']})
+    except InvalidId: pass
+    return redirect(url_for('list_specials'))
+
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    with app.app_context():
+        seed_database()
+    app.run(debug=True, port=5000)
