@@ -152,118 +152,288 @@ BUSINESS_SELECTION_TEMPLATE = """
     <title>Select Your Business Type - StoreFactory</title>
     <style>
         * { font-family: 'Poppins', sans-serif; }
+        
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            background-size: 200% 200%;
+            animation: gradientShift 15s ease infinite;
+        }
+        
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        
         .business-card {
+            position: relative;
+            overflow: hidden;
             transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            border: 2px solid rgba(59, 130, 246, 0.3);
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(59, 130, 246, 0.2);
         }
+        
+        .business-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.1), transparent);
+            transition: left 0.5s;
+        }
+        
+        .business-card:hover::before {
+            left: 100%;
+        }
+        
         .business-card:hover {
-            transform: translateY(-12px) scale(1.02);
-            box-shadow: 0 25px 50px -12px rgba(59, 130, 246, 0.4);
-            border-color: rgba(59, 130, 246, 0.7);
-            background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+            transform: translateY(-8px) scale(1.03);
+            box-shadow: 0 20px 40px -10px rgba(59, 130, 246, 0.5), 0 0 0 1px rgba(59, 130, 246, 0.4);
+            border-color: rgba(59, 130, 246, 0.6);
+            background: rgba(51, 65, 85, 0.9);
         }
+        
+        .business-icon {
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(139, 92, 246, 0.2));
+            border-radius: 20px;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            transition: all 0.4s ease;
+        }
+        
+        .business-card:hover .business-icon {
+            transform: rotate(5deg) scale(1.1);
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(139, 92, 246, 0.4));
+            border-color: rgba(59, 130, 246, 0.6);
+            box-shadow: 0 10px 20px rgba(59, 130, 246, 0.3);
+        }
+        
         .gradient-bg {
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            position: relative;
         }
+        
+        .gradient-bg::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 30% 20%, rgba(59, 130, 246, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+        
         .hero-pattern {
-            background-image: radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0);
-            background-size: 40px 40px;
+            background-image: 
+                radial-gradient(circle at 2px 2px, rgba(255,255,255,0.05) 1px, transparent 0),
+                radial-gradient(circle at 18px 18px, rgba(59, 130, 246, 0.03) 1px, transparent 0);
+            background-size: 40px 40px, 60px 60px;
         }
+        
+        .feature-badge {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            transition: all 0.3s ease;
+        }
+        
+        .feature-badge:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        
+        .cta-card {
+            background: linear-gradient(135deg, rgba(51, 65, 85, 0.8), rgba(30, 41, 59, 0.8));
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .cta-card:hover {
+            border-color: rgba(59, 130, 246, 0.6);
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.2);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .btn-primary::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s, height 0.6s;
+        }
+        
+        .btn-primary:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(59, 130, 246, 0.4);
+        }
+        
+        @media (max-width: 768px) {
+            .business-card:hover {
+                transform: translateY(-4px) scale(1.01);
+            }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.8s ease-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+        .stagger-5 { animation-delay: 0.5s; }
     </style>
 </head>
-<body class="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 min-h-screen">
-    <div class="gradient-bg hero-pattern py-20">
-        <div class="container mx-auto px-6 text-center mb-16">
-            <h1 class="text-6xl md:text-7xl font-extrabold text-white mb-6 drop-shadow-lg">
-                Welcome to <span class="bg-gradient-to-r from-yellow-300 to-orange-300 bg-clip-text text-transparent">StoreFactory</span>
-            </h1>
-            <p class="text-2xl text-gray-300 max-w-3xl mx-auto mb-8 font-medium">Create your store in minutes. No coding required.</p>
-            <div class="flex flex-wrap justify-center gap-4 text-white">
-                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/20">
-                    <i class="fas fa-check-circle text-yellow-300"></i>
-                    <span>Easy Setup</span>
-                </div>
-                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/20">
-                    <i class="fas fa-check-circle text-yellow-300"></i>
-                    <span>Multiple Business Types</span>
-                </div>
-                <div class="flex items-center gap-2 bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/20">
-                    <i class="fas fa-check-circle text-yellow-300"></i>
-                    <span>Mobile Friendly</span>
+<body class="min-h-screen">
+    <div class="gradient-bg hero-pattern py-16 md:py-24 relative z-10">
+        <div class="container mx-auto px-6 text-center relative z-20">
+            <div class="fade-in">
+                <h1 class="text-5xl md:text-7xl lg:text-8xl font-extrabold text-white mb-6 leading-tight">
+                    Welcome to <span class="bg-gradient-to-r from-yellow-300 via-orange-300 to-yellow-300 bg-clip-text text-transparent animate-pulse">StoreFactory</span>
+                </h1>
+                <p class="text-xl md:text-2xl text-gray-300 max-w-3xl mx-auto mb-10 font-medium leading-relaxed">
+                    Create your store in minutes. No coding required.
+                </p>
+                <div class="flex flex-wrap justify-center gap-3 md:gap-4 text-white">
+                    <div class="feature-badge px-5 py-3 rounded-full">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-check-circle text-yellow-300 text-lg"></i>
+                            <span class="font-medium">Easy Setup</span>
+                        </div>
+                    </div>
+                    <div class="feature-badge px-5 py-3 rounded-full">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-check-circle text-yellow-300 text-lg"></i>
+                            <span class="font-medium">Multiple Business Types</span>
+                        </div>
+                    </div>
+                    <div class="feature-badge px-5 py-3 rounded-full">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-check-circle text-yellow-300 text-lg"></i>
+                            <span class="font-medium">Mobile Friendly</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <div class="container mx-auto px-6 py-16 -mt-10">
-        <div class="mb-12 text-center">
-            <h2 class="text-4xl font-bold text-white mb-4">Choose Your Business Type</h2>
-            <p class="text-lg text-gray-300 max-w-2xl mx-auto">Select the type that best matches your business to get started</p>
+    <div class="container mx-auto px-4 md:px-6 py-12 md:py-20 -mt-8 relative z-10">
+        <div class="mb-12 md:mb-16 text-center fade-in">
+            <h2 class="text-3xl md:text-5xl font-bold text-white mb-4">Choose Your Business Type</h2>
+            <p class="text-lg md:text-xl text-gray-300 max-w-2xl mx-auto leading-relaxed">
+                Select the type that best matches your business to get started
+            </p>
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-6xl mx-auto mb-16">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 max-w-7xl mx-auto mb-16">
             <a href="{{ url_for('select_business', business_type='restaurant') }}" 
-               class="business-card rounded-2xl shadow-xl p-10 text-center block group">
-                <div class="text-7xl mb-6 transform group-hover:scale-110 transition-transform">🍕</div>
-                <h3 class="text-3xl font-bold text-white mb-3">Restaurant</h3>
-                <p class="text-gray-300 mb-4">Menu items, orders, and specials</p>
-                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4">
+               class="business-card rounded-3xl shadow-2xl p-8 md:p-10 text-center block group fade-in stagger-1">
+                <div class="business-icon mb-6">
+                    <i class="fas fa-utensils text-4xl text-indigo-400"></i>
+                </div>
+                <h3 class="text-2xl md:text-3xl font-bold text-white mb-3">Restaurant</h3>
+                <p class="text-gray-400 mb-6 leading-relaxed text-sm md:text-base">Menu items, orders, and specials</p>
+                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4 group-hover:text-indigo-300 transition-colors">
                     <span>Get Started</span>
                     <i class="fas fa-arrow-right transform group-hover:translate-x-2 transition-transform"></i>
                 </div>
             </a>
             
             <a href="{{ url_for('select_business', business_type='auto-sales') }}" 
-               class="business-card rounded-2xl shadow-xl p-10 text-center block group">
-                <div class="text-7xl mb-6 transform group-hover:scale-110 transition-transform">🚗</div>
-                <h3 class="text-3xl font-bold text-white mb-3">Auto Sales</h3>
-                <p class="text-gray-300 mb-4">Vehicle inventory and inquiries</p>
-                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4">
+               class="business-card rounded-3xl shadow-2xl p-8 md:p-10 text-center block group fade-in stagger-2">
+                <div class="business-icon mb-6">
+                    <i class="fas fa-car text-4xl text-indigo-400"></i>
+                </div>
+                <h3 class="text-2xl md:text-3xl font-bold text-white mb-3">Auto Sales</h3>
+                <p class="text-gray-400 mb-6 leading-relaxed text-sm md:text-base">Vehicle inventory and inquiries</p>
+                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4 group-hover:text-indigo-300 transition-colors">
                     <span>Get Started</span>
                     <i class="fas fa-arrow-right transform group-hover:translate-x-2 transition-transform"></i>
                 </div>
             </a>
             
             <a href="{{ url_for('select_business', business_type='auto-services') }}" 
-               class="business-card rounded-2xl shadow-xl p-10 text-center block group">
-                <div class="text-7xl mb-6 transform group-hover:scale-110 transition-transform">🔧</div>
-                <h3 class="text-3xl font-bold text-white mb-3">Auto Services</h3>
-                <p class="text-gray-300 mb-4">Service listings and appointments</p>
-                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4">
+               class="business-card rounded-3xl shadow-2xl p-8 md:p-10 text-center block group fade-in stagger-3">
+                <div class="business-icon mb-6">
+                    <i class="fas fa-wrench text-4xl text-indigo-400"></i>
+                </div>
+                <h3 class="text-2xl md:text-3xl font-bold text-white mb-3">Auto Services</h3>
+                <p class="text-gray-400 mb-6 leading-relaxed text-sm md:text-base">Service listings and appointments</p>
+                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4 group-hover:text-indigo-300 transition-colors">
                     <span>Get Started</span>
                     <i class="fas fa-arrow-right transform group-hover:translate-x-2 transition-transform"></i>
                 </div>
             </a>
             
             <a href="{{ url_for('select_business', business_type='other-services') }}" 
-               class="business-card rounded-2xl shadow-xl p-10 text-center block group">
-                <div class="text-7xl mb-6 transform group-hover:scale-110 transition-transform">💼</div>
-                <h3 class="text-3xl font-bold text-white mb-3">Other Services</h3>
-                <p class="text-gray-300 mb-4">General service offerings</p>
-                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4">
+               class="business-card rounded-3xl shadow-2xl p-8 md:p-10 text-center block group fade-in stagger-4">
+                <div class="business-icon mb-6">
+                    <i class="fas fa-briefcase text-4xl text-indigo-400"></i>
+                </div>
+                <h3 class="text-2xl md:text-3xl font-bold text-white mb-3">Other Services</h3>
+                <p class="text-gray-400 mb-6 leading-relaxed text-sm md:text-base">General service offerings</p>
+                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4 group-hover:text-indigo-300 transition-colors">
                     <span>Get Started</span>
                     <i class="fas fa-arrow-right transform group-hover:translate-x-2 transition-transform"></i>
                 </div>
             </a>
             
             <a href="{{ url_for('select_business', business_type='generic-store') }}" 
-               class="business-card rounded-2xl shadow-xl p-10 text-center block group">
-                <div class="text-7xl mb-6 transform group-hover:scale-110 transition-transform">🏪</div>
-                <h3 class="text-3xl font-bold text-white mb-3">Generic Store</h3>
-                <p class="text-gray-300 mb-4">Products and inventory</p>
-                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4">
+               class="business-card rounded-3xl shadow-2xl p-8 md:p-10 text-center block group fade-in stagger-5">
+                <div class="business-icon mb-6">
+                    <i class="fas fa-store text-4xl text-indigo-400"></i>
+                </div>
+                <h3 class="text-2xl md:text-3xl font-bold text-white mb-3">Generic Store</h3>
+                <p class="text-gray-400 mb-6 leading-relaxed text-sm md:text-base">Products and inventory</p>
+                <div class="flex justify-center items-center gap-2 text-indigo-400 font-semibold mt-4 group-hover:text-indigo-300 transition-colors">
                     <span>Get Started</span>
                     <i class="fas fa-arrow-right transform group-hover:translate-x-2 transition-transform"></i>
                 </div>
             </a>
         </div>
         
-        <div class="text-center bg-gray-800 border border-gray-700 rounded-2xl shadow-lg p-8 max-w-2xl mx-auto">
-            <h3 class="text-2xl font-bold text-white mb-4">Already have a store?</h3>
-            <p class="text-gray-300 mb-6">Browse all existing stores or access your dashboard</p>
+        <div class="cta-card text-center rounded-3xl shadow-2xl p-8 md:p-12 max-w-3xl mx-auto fade-in">
+            <div class="mb-6">
+                <i class="fas fa-store text-5xl text-indigo-400 mb-4"></i>
+                <p class="text-lg md:text-xl text-gray-300 mb-8 leading-relaxed">
+                    Browse all existing stores or access your dashboard
+                </p>
+            </div>
             <a href="{{ url_for('list_stores') }}" 
-               class="inline-flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold py-4 px-8 rounded-xl shadow-lg transform hover:scale-105 transition-all">
+               class="btn-primary inline-flex items-center gap-3 text-white font-bold py-4 px-8 md:px-10 rounded-xl shadow-lg relative z-10">
                 <i class="fas fa-store"></i>
                 <span>View All Stores</span>
                 <i class="fas fa-arrow-right"></i>
@@ -2859,8 +3029,8 @@ def seed_database():
             'hours': 'Monday-Saturday: 9am-7pm\nSunday: 11am-5pm',
             'hero_image_url': 'https://images.pexels.com/photos/116675/pexels-photo-116675.jpeg?auto=compress&cs=tinysrgb&w=1600',
             'items': [
-                {'name': '2020 Toyota Camry', 'price': 18900.00, 'item_code': 'VIN001', 'description': 'Well-maintained sedan with low mileage', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1617486496723-e46bd3c9bd9d?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Toyota', 'Model': 'Camry', 'Year': '2020', 'Mileage': '25000', 'Color': 'Silver', 'Condition': 'Excellent'}},
-                {'name': '2019 Honda CR-V', 'price': 22900.00, 'item_code': 'VIN002', 'description': 'Spacious SUV perfect for families', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1603386329225-868ef9bc733d?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Honda', 'Model': 'CR-V', 'Year': '2019', 'Mileage': '32000', 'Color': 'Black', 'Condition': 'Very Good'}},
+                {'name': '2020 Toyota Camry', 'price': 18900.00, 'item_code': 'VIN001', 'description': 'Well-maintained sedan with low mileage', 'status': 'Available', 'image_url': 'https://images.pexels.com/photos/3802508/pexels-photo-3802508.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop', 'attributes': {'Make': 'Toyota', 'Model': 'Camry', 'Year': '2020', 'Mileage': '25000', 'Color': 'Silver', 'Condition': 'Excellent'}},
+                {'name': '2019 Honda CR-V', 'price': 22900.00, 'item_code': 'VIN002', 'description': 'Spacious SUV perfect for families', 'status': 'Available', 'image_url': 'https://images.pexels.com/photos/1149137/pexels-photo-1149137.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop', 'attributes': {'Make': 'Honda', 'Model': 'CR-V', 'Year': '2019', 'Mileage': '32000', 'Color': 'Black', 'Condition': 'Very Good'}},
                 {'name': '2021 Ford F-150', 'price': 32900.00, 'item_code': 'VIN003', 'description': 'Powerful truck ready for work or play', 'status': 'Pending', 'image_url': 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Ford', 'Model': 'F-150', 'Year': '2021', 'Mileage': '18000', 'Color': 'Blue', 'Condition': 'Excellent'}},
             ],
             'specials': [
