@@ -17,6 +17,7 @@ import os
 import datetime
 from flask import Flask, request, render_template_string, redirect, url_for, flash, session, g, abort, Response
 import json
+import re
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
@@ -281,6 +282,7 @@ LAYOUT_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <title>{{ store.name }} - {{ business_config.name }}</title>
     <style>
         body { 
@@ -365,10 +367,10 @@ LAYOUT_TEMPLATE = """
              <a href="{{ url_for('store_home', store_slug=store.slug_id) }}#{{ business_config.section_label.lower().replace(' ', '-') }}" class="block px-6 py-3 hover:bg-gray-700">{{ business_config.section_label }}</a>
              <a href="{{ url_for('store_home', store_slug=store.slug_id) }}#contact" class="block px-6 py-3 hover:bg-gray-700">Contact</a>
              {% if 'user_id' in session and session.get('store_id') == store._id|string %}
-                <a href="{{ url_for('admin_dashboard', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-blue-600 hover:bg-blue-700">Dashboard</a>
-                <a href="{{ url_for('admin_logout', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-red-600 hover:bg-red-700" onclick="return confirm('Are you sure you want to logout?');">Logout</a>
+                 <a href="{{ url_for('admin_dashboard', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-blue-600 hover:bg-blue-700">Dashboard</a>
+                 <a href="{{ url_for('admin_logout', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-red-600 hover:bg-red-700" onclick="return confirm('Are you sure you want to logout?');">Logout</a>
              {% else %}
-                <a href="{{ url_for('admin_login', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-indigo-600 hover:bg-indigo-700">Login</a>
+                 <a href="{{ url_for('admin_login', store_slug=store.slug_id) }}" class="block px-6 py-3 bg-indigo-600 hover:bg-indigo-700">Login</a>
              {% endif %}
         </div>
     </header>
@@ -389,7 +391,7 @@ LAYOUT_TEMPLATE = """
     <footer style="background-color: {{ store.theme_surface or '#1f2937' }}; color: {{ store.theme_text or '#f9fafb' }};" class="mt-12 py-10">
         <div class="container mx-auto px-6 text-center">
             {% if store.logo_url %}<img src="{{ store.logo_url }}" alt="Logo" class="h-16 mx-auto mb-4">{% endif %}
-            <p>© {{ now.year }} {{ store.name }}. Todos los derechos reservados.</p>
+            <p>© {{ now.year }} {{ store.name }}. </p>
             <p class="text-sm text-gray-400 mt-2">Powered by StoreFactory</p>
         </div>
     </footer>
@@ -504,10 +506,10 @@ ITEM_DETAILS_TEMPLATE = """
             <div class="mt-6 border-t border-gray-600 pt-6">
                  <h2 class="text-xl font-semibold mb-3 text-white">Details</h2>
                  <ul class="space-y-2 text-gray-300">
-                     <li><strong class="text-white">{{ business_config.item_code_label }}:</strong> {{ item.item_code }}</li>
-                     {% for key, value in item.attributes.items() %}
-                     <li><strong class="text-white">{{ key }}:</strong> {{ value }}</li>
-                     {% endfor %}
+                      <li><strong class="text-white">{{ business_config.item_code_label }}:</strong> {{ item.item_code }}</li>
+                      {% for key, value in item.attributes.items() %}
+                      <li><strong class="text-white">{{ key }}:</strong> {{ value }}</li>
+                      {% endfor %}
                  </ul>
             </div>
             
@@ -550,7 +552,6 @@ DASHBOARD_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Stats Cards -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
         <div class="bg-gradient-to-br from-blue-500 to-cyan-500 rounded-2xl shadow-xl p-6 transform hover:scale-105 transition-all">
             <div class="flex items-center justify-between mb-4">
@@ -582,7 +583,6 @@ DASHBOARD_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Quick Actions -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <a href="{{ url_for('admin_list_items', store_slug=store.slug_id) }}" 
            class="bg-gradient-to-br from-gray-800 to-gray-900 border-2 border-gray-700 rounded-2xl shadow-xl p-8 hover:shadow-2xl hover:border-blue-500 transform hover:scale-105 transition-all group">
@@ -637,7 +637,6 @@ DASHBOARD_TEMPLATE = """
         </a>
     </div>
 
-    <!-- Store Management -->
     <div class="bg-gradient-to-br from-red-900/30 to-orange-900/30 border-2 border-red-500/30 rounded-2xl shadow-xl p-8 mb-8">
         <div class="flex items-center justify-between mb-6">
             <div>
@@ -668,7 +667,6 @@ DASHBOARD_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Recent Activity -->
     <div class="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl shadow-xl p-8">
         <h2 class="text-3xl font-bold mb-6 text-white flex items-center gap-3">
             <i class="fas fa-clock text-yellow-400"></i>
@@ -833,7 +831,9 @@ STORE_SELECTION_TEMPLATE = """
                         </label>
                         <textarea name="hours" id="hours" rows="3" 
                                   class="w-full px-4 py-3 bg-gray-800 border-2 border-gray-600 text-white rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all resize-none"
-                                  placeholder="Monday-Friday: 9am-5pm&#10;Saturday: 10am-3pm&#10;Sunday: Closed"></textarea>
+                                  placeholder="Monday-Friday: 9am-5pm
+Saturday: 10am-3pm
+Sunday: Closed"></textarea>
                         <p class="text-xs text-gray-400 mt-1">💡 Press Enter for new lines</p>
                     </div>
                     
@@ -1110,7 +1110,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Juicy beef patty with fresh lettuce, tomato, and our special sauce on a toasted bun.",
                 "status": "Available",
                 "attributes": {"Category": "Main Course", "Ingredients": "Beef, Lettuce, Tomato, Cheese", "Allergens": "Gluten, Dairy"},
-                "image_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800",
+                "image_url": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1121,7 +1121,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Traditional Italian pizza with fresh mozzarella, basil, and tomato sauce.",
                 "status": "Available",
                 "attributes": {"Category": "Main Course", "Ingredients": "Dough, Mozzarella, Basil, Tomato Sauce", "Allergens": "Gluten, Dairy"},
-                "image_url": "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800",
+                "image_url": "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1132,7 +1132,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Fresh romaine lettuce with Caesar dressing, parmesan cheese, and croutons.",
                 "status": "Available",
                 "attributes": {"Category": "Salad", "Ingredients": "Romaine, Caesar Dressing, Parmesan, Croutons", "Allergens": "Dairy, Gluten"},
-                "image_url": "https://images.unsplash.com/photo-1546793665-c74683f339c1?w=800",
+                "image_url": "https://images.unsplash.com/photo-1546793665-c74683f339c1?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1143,7 +1143,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Warm chocolate cake with a molten center, served with vanilla ice cream.",
                 "status": "Available",
                 "attributes": {"Category": "Dessert", "Ingredients": "Chocolate, Flour, Eggs, Butter", "Allergens": "Gluten, Dairy, Eggs"},
-                "image_url": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=800",
+                "image_url": "https://images.unsplash.com/photo-1606313564200-e75d5e30476c?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1154,7 +1154,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Refreshing homemade lemonade made with fresh lemons.",
                 "status": "Available",
                 "attributes": {"Category": "Beverage", "Ingredients": "Lemons, Sugar, Water", "Allergens": "None"},
-                "image_url": "https://images.unsplash.com/photo-1523677011783-c91d1bbe2dcf?w=800",
+                "image_url": "https://images.unsplash.com/photo-1523677011783-c91d1bbe2dcf?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             }
@@ -1168,7 +1168,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Well-maintained sedan with low mileage and excellent fuel economy.",
                 "status": "Available",
                 "attributes": {"Make": "Honda", "Model": "Accord", "Year": "2020", "Mileage": "35000", "Color": "Silver", "Condition": "Excellent"},
-                "image_url": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=800",
+                "image_url": "https://images.unsplash.com/photo-1549317661-bd32c8ce0db2?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1179,7 +1179,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Reliable and spacious family sedan with great safety features.",
                 "status": "Available",
                 "attributes": {"Make": "Toyota", "Model": "Camry", "Year": "2019", "Mileage": "42000", "Color": "White", "Condition": "Very Good"},
-                "image_url": "https://images.unsplash.com/photo-1617486496723-e46bd3c9bd9d?w=800",
+                "image_url": "https://images.unsplash.com/photo-1617486496723-e46bd3c9bd9d?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1190,7 +1190,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Powerful pickup truck perfect for work or adventure.",
                 "status": "Available",
                 "attributes": {"Make": "Ford", "Model": "F-150", "Year": "2021", "Mileage": "28000", "Color": "Black", "Condition": "Excellent"},
-                "image_url": "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=800",
+                "image_url": "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             }
@@ -1204,7 +1204,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Complete oil change service with premium oil and filter replacement.",
                 "status": "Available",
                 "attributes": {"Service Type": "Maintenance", "Duration": "30 minutes", "Warranty": "3 months", "Includes": "Oil change, filter replacement, fluid check"},
-                "image_url": "https://images.unsplash.com/photo-1581092160562-40aa08e78837?w=800",
+                "image_url": "https://images.unsplash.com/photo-1581092160562-40aa08e78837?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1215,7 +1215,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Comprehensive brake inspection and necessary adjustments or repairs.",
                 "status": "Available",
                 "attributes": {"Service Type": "Repair", "Duration": "1-2 hours", "Warranty": "6 months", "Includes": "Inspection, adjustment, pad replacement if needed"},
-                "image_url": "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=800",
+                "image_url": "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1226,7 +1226,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Complete engine diagnostic scan to identify any issues.",
                 "status": "Available",
                 "attributes": {"Service Type": "Diagnostic", "Duration": "1 hour", "Warranty": "N/A", "Includes": "Computer scan, report, recommendations"},
-                "image_url": "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=800",
+                "image_url": "https://images.unsplash.com/photo-1492144534655-ae79c964c9d7?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             }
@@ -1240,7 +1240,7 @@ def seed_default_data(store_id, business_type):
                 "description": "One-on-one consultation to discuss your needs and provide recommendations.",
                 "status": "Available",
                 "attributes": {"Service Type": "Consultation", "Duration": "1 hour", "What's Included": "Initial meeting, needs assessment, recommendations"},
-                "image_url": "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800",
+                "image_url": "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1251,7 +1251,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Comprehensive service package tailored to your requirements.",
                 "status": "Available",
                 "attributes": {"Service Type": "Package", "Duration": "2-3 hours", "What's Included": "Full service, follow-up, support"},
-                "image_url": "https://images.unsplash.com/photo-1556761175-b413da4baf72?w=800",
+                "image_url": "https://images.unsplash.com/photo-1556761175-b413da4baf72?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1262,7 +1262,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Premium service with extended support and priority handling.",
                 "status": "Available",
                 "attributes": {"Service Type": "Premium", "Duration": "4-6 hours", "What's Included": "Premium service, priority support, extended warranty"},
-                "image_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800",
+                "image_url": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             }
@@ -1276,7 +1276,7 @@ def seed_default_data(store_id, business_type):
                 "description": "High-quality product with excellent value.",
                 "status": "Available",
                 "attributes": {"Category": "General", "Brand": "Premium", "Color": "Black", "Size": "Standard", "Material": "Quality"},
-                "image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800",
+                "image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1287,7 +1287,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Upgraded version with additional features.",
                 "status": "Available",
                 "attributes": {"Category": "Premium", "Brand": "Deluxe", "Color": "Silver", "Size": "Large", "Material": "Premium"},
-                "image_url": "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800",
+                "image_url": "https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             },
@@ -1298,7 +1298,7 @@ def seed_default_data(store_id, business_type):
                 "description": "Great value option for everyday use.",
                 "status": "Available",
                 "attributes": {"Category": "Standard", "Brand": "Standard", "Color": "Blue", "Size": "Medium", "Material": "Standard"},
-                "image_url": "https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=800",
+                "image_url": "https://images.unsplash.com/photo-1468495244123-6c6c332eeece?w=800&auto=format&fit=crop",
                 "store_id": store_id,
                 "date_added": now
             }
@@ -1371,7 +1371,7 @@ def create_store(business_type):
         "gallery_image_1_url": None,
         "gallery_image_2_url": None,
         "menu_image_url": None,
-        "google_maps_embed_html": None,
+        "google_maps_embed_html": '<iframe src="https://www.google.com/maps?q=Orlando,+FL+32812&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>',
         "inventory_description": None,
         "socials": [],
         # Theme defaults
@@ -1468,7 +1468,7 @@ DOWNLOAD_STORE_TEMPLATE = """
                     <ol class="space-y-3 text-gray-300 list-decimal list-inside">
                         <li>Download the <code class="bg-gray-800 px-2 py-1 rounded text-white">main.py</code> file</li>
                         <li>Create a virtual environment: <code class="bg-gray-800 px-2 py-1 rounded text-white">python -m venv venv</code></li>
-                        <li>Activate it: <code class="bg-gray-800 px-2 py-1 rounded text-white">source venv/bin/activate</code> (Linux/Mac) or <code class="bg-gray-800 px-2 py-1 rounded text-white">venv\\Scripts\\activate</code> (Windows)</li>
+                        <li>Activate it: <code class="bg-gray-800 px-2 py-1 rounded text-white">source venv/bin/activate</code> (Linux/Mac) or <code class="bg-gray-800 px-2 py-1 rounded text-white">venv\Scripts\activate</code> (Windows)</li>
                         <li>Install dependencies: <code class="bg-gray-800 px-2 py-1 rounded text-white">pip install flask pymongo python-dotenv</code></li>
                         <li>Run the app: <code class="bg-gray-800 px-2 py-1 rounded text-white">python main.py</code></li>
                     </ol>
@@ -1608,7 +1608,6 @@ def download_store_file(store_slug):
     # Helper function to convert multi-store URLs to standalone format
     def convert_to_standalone_urls(template_str):
         """Convert URL references from multi-store format to standalone format."""
-        import re
         result = template_str
         
         # Replace store_home with home (all variations)
@@ -1627,11 +1626,15 @@ def download_store_file(store_slug):
         result = re.sub(r"url_for\(['\"]item_details['\"],\s*store_slug=store\.slug_id,\s*item_id=", "url_for('item_details', item_id=", result)
         result = re.sub(r"url_for\(['\"]item_details['\"],\s*store_slug=store_slug,\s*item_id=", "url_for('item_details', item_id=", result)
         
+        # Replace inquiry submit
+        result = re.sub(r"url_for\(['\"]submit_inquiry['\"],\s*store_slug=store\.slug_id,\s*item_id=", "url_for('submit_inquiry', item_id=", result)
+        result = re.sub(r"url_for\(['\"]submit_inquiry['\"],\s*store_slug=store_slug,\s*item_id=", "url_for('submit_inquiry', item_id=", result)
+
         # Replace admin routes - more comprehensive pattern matching
         admin_routes = ['admin_login', 'admin_logout', 'admin_dashboard', 'admin_list_items', 
-                       'admin_add_item', 'admin_edit_item', 'admin_delete_item', 'admin_list_specials',
-                       'admin_add_special', 'admin_edit_special', 'admin_delete_special',
-                       'admin_list_inquiries', 'admin_delete_inquiry', 'admin_store_settings']
+                        'admin_add_item', 'admin_edit_item', 'admin_delete_item', 'admin_list_specials',
+                        'admin_add_special', 'admin_edit_special', 'admin_delete_special',
+                        'admin_list_inquiries', 'admin_delete_inquiry', 'admin_store_settings', 'admin_reset_store']
         
         for route in admin_routes:
             # Pattern 1: url_for('route', store_slug=store.slug_id)
@@ -1658,7 +1661,9 @@ def download_store_file(store_slug):
     specials_dashboard_template_standalone = convert_to_standalone_urls(SPECIALS_DASHBOARD_TEMPLATE)
     special_form_template_standalone = convert_to_standalone_urls(SPECIAL_FORM_TEMPLATE)
     inquiries_dashboard_template_standalone = convert_to_standalone_urls(INQUIRIES_DASHBOARD_TEMPLATE)
-    
+    # Note: STORE_SETTINGS_TEMPLATE is added later in this file, so we'll convert it too
+    store_settings_template_standalone = convert_to_standalone_urls(STORE_SETTINGS_TEMPLATE)
+
     # Escape templates for embedding
     layout_template_escaped = escape_template(layout_template_standalone)
     home_template_escaped = escape_template(home_template_standalone)
@@ -1670,7 +1675,8 @@ def download_store_file(store_slug):
     specials_dashboard_template_escaped = escape_template(specials_dashboard_template_standalone)
     special_form_template_escaped = escape_template(special_form_template_standalone)
     inquiries_dashboard_template_escaped = escape_template(inquiries_dashboard_template_standalone)
-    
+    store_settings_template_escaped = escape_template(store_settings_template_standalone)
+
     # Generate standalone Flask app code
     secret_key_default = os.getenv("SECRET_KEY", "a-super-secret-key-change-in-production")
     store_name = store['name']
@@ -1752,7 +1758,7 @@ def initialize_store():
         store_doc['_id'] = ObjectId(store_doc['_id'])
         store_doc['date_created'] = datetime.datetime.fromisoformat(store_doc['date_created'])
         store_id = db.stores.insert_one(store_doc).inserted_id
-        print(f"   ✓ Store '{store_name}' created!")
+        print(f"    ✓ Store '{store_name}' created!")
         
         # Create admin user
         user_doc = {{
@@ -1763,7 +1769,7 @@ def initialize_store():
             "date_created": datetime.datetime.utcnow()
         }}
         db.users.insert_one(user_doc)
-        print(f"   ✓ Admin user created: {user_email}")
+        print(f"    ✓ Admin user created: {user_email}")
         
         # Insert items
         items_data = {items_json}
@@ -1775,7 +1781,7 @@ def initialize_store():
                 item['date_added'] = datetime.datetime.fromisoformat(item['date_added'])
             db.items.insert_one(item)
         if items_count > 0:
-            print(f"   ✓ {{items_count}} items seeded!")
+            print(f"    ✓ {{items_count}} items seeded!")
         
         # Insert specials
         specials_data = {specials_json}
@@ -1787,10 +1793,10 @@ def initialize_store():
                 special['date_created'] = datetime.datetime.fromisoformat(special['date_created'])
             db.specials.insert_one(special)
         if specials_count > 0:
-            print(f"   ✓ {{specials_count}} specials seeded!")
+            print(f"    ✓ {{specials_count}} specials seeded!")
         
         print("\\n✨ Store ready! Visit http://localhost:5000")
-        print(f"   Admin Login: {user_email}")
+        print(f"    Admin Login: {user_email}")
         print("="*60 + "\\n")
         return store_id
     else:
@@ -1809,7 +1815,7 @@ def initialize_store():
                 "date_created": datetime.datetime.utcnow()
             }}
             db.users.insert_one(user_doc)
-            print(f"   ✓ Admin user created: {user_email}")
+            print(f"    ✓ Admin user created: {user_email}")
         
         # Check if items exist, seed if not
         existing_items_count = db.items.count_documents({{"store_id": store_id}})
@@ -1817,7 +1823,7 @@ def initialize_store():
             print("📦 Seeding items...")
             items_data = {items_json}
             items_count = len(items_data)
-            print(f"   📊 Found {{items_count}} items in data to seed...")
+            print(f"    📊 Found {{items_count}} items in data to seed...")
             items_seeded = 0
             for item in items_data:
                 try:
@@ -1833,14 +1839,14 @@ def initialize_store():
                     db.items.insert_one(item_copy)
                     items_seeded += 1
                 except Exception as e:
-                    print(f"   ⚠️ Error seeding item: {{e}}")
+                    print(f"    ⚠️ Error seeding item: {{e}}")
                     continue
             if items_seeded > 0:
-                print(f"   ✓ {{items_seeded}} items seeded!")
+                print(f"    ✓ {{items_seeded}} items seeded!")
             elif items_count == 0:
-                print(f"   ⚠️ No items to seed (items_json is empty)")
+                print(f"    ⚠️ No items to seed (items_json is empty)")
         else:
-            print(f"   ✓ {{existing_items_count}} items already exist")
+            print(f"    ✓ {{existing_items_count}} items already exist")
         
         # Check if specials exist, seed if not
         existing_specials_count = db.specials.count_documents({{"store_id": store_id}})
@@ -1848,7 +1854,7 @@ def initialize_store():
             print("📦 Seeding specials...")
             specials_data = {specials_json}
             specials_count = len(specials_data)
-            print(f"   📊 Found {{specials_count}} specials in data to seed...")
+            print(f"    📊 Found {{specials_count}} specials in data to seed...")
             specials_seeded = 0
             for special in specials_data:
                 try:
@@ -1864,17 +1870,17 @@ def initialize_store():
                     db.specials.insert_one(special_copy)
                     specials_seeded += 1
                 except Exception as e:
-                    print(f"   ⚠️ Error seeding special: {{e}}")
+                    print(f"    ⚠️ Error seeding special: {{e}}")
                     continue
             if specials_seeded > 0:
-                print(f"   ✓ {{specials_seeded}} specials seeded!")
+                print(f"    ✓ {{specials_seeded}} specials seeded!")
             elif specials_count == 0:
-                print(f"   ⚠️ No specials to seed (specials_json is empty)")
+                print(f"    ⚠️ No specials to seed (specials_json is empty)")
         else:
-            print(f"   ✓ {{existing_specials_count}} specials already exist")
+            print(f"    ✓ {{existing_specials_count}} specials already exist")
         
         print(f"\\n✨ Store ready! Visit http://localhost:5000")
-        print(f"   Admin Login: {user_email}")
+        print(f"    Admin Login: {user_email}")
         print("="*60 + "\\n")
         return store_id
 
@@ -1898,6 +1904,8 @@ SPECIALS_DASHBOARD_TEMPLATE = """{specials_dashboard_template_escaped}"""
 SPECIAL_FORM_TEMPLATE = """{special_form_template_escaped}"""
 
 INQUIRIES_DASHBOARD_TEMPLATE = """{inquiries_dashboard_template_escaped}"""
+
+STORE_SETTINGS_TEMPLATE = """{store_settings_template_escaped}"""
 
 # --- Helper Functions ---
 def render_page(template_string, **context):
@@ -1926,7 +1934,7 @@ def owner_required(f):
         if ('user_id' not in session or 'store_id' not in session or
             session['store_id'] != str(g.store['_id'])):
             flash('You must be logged in as the owner to view this page.', 'error')
-            return redirect(url_for('admin_login', store_slug=g.store['slug_id']))
+            return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -2016,7 +2024,14 @@ def admin_logout():
 @owner_required
 def admin_dashboard():
     """Display the admin dashboard."""
-    return render_page(DASHBOARD_TEMPLATE)
+    items_count = db.items.count_documents({{"store_id": g.store['_id']}})
+    specials_count = db.specials.count_documents({{"store_id": g.store['_id']}})
+    inquiries_count = db.inquiries.count_documents({{"store_id": g.store['_id']}})
+    
+    return render_page(DASHBOARD_TEMPLATE,
+                       items_count=items_count,
+                       specials_count=specials_count,
+                       inquiries_count=inquiries_count)
 
 @app.route('/admin/items')
 @owner_required
@@ -2183,33 +2198,59 @@ def admin_reset_store():
     items_reseeded = 0
     for item in items_data:
         # Generate new ObjectId for reseeded items
-        item['_id'] = ObjectId()
-        item['store_id'] = store_id
-        item['date_added'] = datetime.datetime.utcnow()
-        # Remove old date_added if present
-        if 'date_added' in item and isinstance(item.get('date_added'), str):
-            pass  # Already handled
-        db.items.insert_one(item)
+        item_copy = dict(item)
+        item_copy['_id'] = ObjectId()
+        item_copy['store_id'] = store_id
+        if 'date_added' in item_copy and isinstance(item_copy.get('date_added'), str):
+            item_copy['date_added'] = datetime.datetime.fromisoformat(item_copy['date_added'])
+        else:
+            item_copy['date_added'] = datetime.datetime.utcnow()
+        db.items.insert_one(item_copy)
         items_reseeded += 1
     
     specials_data = {specials_json}
     specials_reseeded = 0
     for special in specials_data:
         # Generate new ObjectId for reseeded specials
-        special['_id'] = ObjectId()
-        special['store_id'] = store_id
-        special['date_created'] = datetime.datetime.utcnow()
-        # Remove old date_created if present
-        if 'date_created' in special and isinstance(special.get('date_created'), str):
-            pass  # Already handled
-        db.specials.insert_one(special)
+        special_copy = dict(special)
+        special_copy['_id'] = ObjectId()
+        special_copy['store_id'] = store_id
+        if 'date_created' in special_copy and isinstance(special_copy.get('date_created'), str):
+            special_copy['date_created'] = datetime.datetime.fromisoformat(special_copy['date_created'])
+        else:
+            special_copy['date_created'] = datetime.datetime.utcnow()
+        db.specials.insert_one(special_copy)
         specials_reseeded += 1
     
     flash(f'✨ Store reset! Deleted {{items_deleted}} items, {{specials_deleted}} specials, {{inquiries_deleted}} inquiries. Reseeded {{items_reseeded}} items and {{specials_reseeded}} specials.', 'success')
     return redirect(url_for('admin_dashboard'))
 
+@app.route('/admin/settings', methods=['GET', 'POST'])
+@owner_required
+def admin_store_settings():
+    """Handle store settings management."""
+    if request.method == 'POST':
+        form = request.form
+        update_data = {{
+            "logo_url": form.get('logo_url') or None,
+            "hero_image_url": form.get('hero_image_url') or None,
+            "gallery_image_1_url": form.get('gallery_image_1_url') or None,
+            "gallery_image_2_url": form.get('gallery_image_2_url') or None,
+            "menu_image_url": form.get('menu_image_url') or None,
+            "google_maps_embed_html": form.get('google_maps_embed_html') or None,
+            "theme_primary": form.get('theme_primary_hex', form.get('theme_primary')),
+            "theme_secondary": form.get('theme_secondary_hex', form.get('theme_secondary')),
+            "theme_background": form.get('theme_background_hex', form.get('theme_background')),
+            "theme_surface": form.get('theme_surface_hex', form.get('theme_surface')),
+            "theme_text": form.get('theme_text_hex', form.get('theme_text')),
+            "theme_text_secondary": form.get('theme_text_secondary_hex', form.get('theme_text_secondary')),
+        }}
+        db.stores.update_one({{"_id": g.store['_id']}}, {{"$set": update_data}})
+        flash('Store settings updated!', 'success')
+        return redirect(url_for('admin_store_settings'))
+    return render_page(STORE_SETTINGS_TEMPLATE)
+
 if __name__ == '__main__':
-    print("\\n🚀 Starting StoreFactory standalone application...")
     with app.app_context():
         initialize_store()
     print("🌐 Server starting on http://localhost:5000\\n")
@@ -2435,6 +2476,7 @@ def admin_delete_inquiry(store_slug, inquiry_id):
 def admin_reset_store(store_slug):
     """Reset store data - clear items, specials, inquiries and reseed from defaults."""
     store_id = g.store['_id']
+    business_type = g.store.get('business_type')
     
     # Delete all items, specials, and inquiries
     items_deleted = db.items.delete_many({"store_id": store_id}).deleted_count
@@ -2442,8 +2484,10 @@ def admin_reset_store(store_slug):
     inquiries_deleted = db.inquiries.delete_many({"store_id": store_id}).deleted_count
     
     # Reseed from stored data if available (for standalone stores, this happens via initialize_store)
-    # For multi-store version, just delete and let user know
-    flash(f'✨ Store reset complete! Deleted {items_deleted} items, {specials_deleted} specials, and {inquiries_deleted} inquiries. You can now add new items and specials!', 'success')
+    # For multi-store version, we re-run the seed_default_data function
+    seed_default_data(store_id, business_type)
+    
+    flash(f'✨ Store reset complete! Deleted {items_deleted} items, {specials_deleted} specials, and {inquiries_deleted} inquiries. Reseeded with fresh demo data!', 'success')
     return redirect(url_for('admin_dashboard', store_slug=store_slug))
 
 # Store Settings Routes
@@ -2466,7 +2510,6 @@ STORE_SETTINGS_TEMPLATE = """
     </div>
 
     <form method="post" id="store-settings-form" class="space-y-8">
-        <!-- Logo Section -->
         <div class="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-8 hover:shadow-3xl transition-all">
             <div class="flex items-center gap-4 mb-6">
                 <div class="w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-white text-2xl shadow-lg">
@@ -2481,7 +2524,7 @@ STORE_SETTINGS_TEMPLATE = """
             <div class="space-y-6">
                 <div>
                     <label for="logo_url" class="block text-sm font-semibold text-gray-200 mb-2">
-                        Logo URL <span class="text-yellow-400">*</span>
+                        Logo URL
                     </label>
                     <p class="text-xs text-gray-400 mb-3">Enter the full URL to your logo (https://example.com/logo.png or /static/img/logo.png)</p>
                     <input type="url" name="logo_url" id="logo_url" 
@@ -2525,7 +2568,6 @@ STORE_SETTINGS_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Theme Colors Section -->
         <div class="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-8 hover:shadow-3xl transition-all">
             <div class="flex items-center gap-4 mb-6">
                 <div class="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center text-white text-2xl shadow-lg">
@@ -2635,7 +2677,6 @@ STORE_SETTINGS_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- Theme Preview -->
             <div class="mt-8 p-6 bg-gray-900 border-2 border-gray-700 rounded-xl">
                 <p class="text-sm font-semibold text-gray-300 mb-4">Live Preview:</p>
                 <div class="grid grid-cols-3 gap-4">
@@ -2652,7 +2693,6 @@ STORE_SETTINGS_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Additional Settings -->
         <div class="bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-8 hover:shadow-3xl transition-all">
             <div class="flex items-center gap-4 mb-6">
                 <div class="w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center text-white text-2xl shadow-lg">
@@ -2683,7 +2723,6 @@ STORE_SETTINGS_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Save Button -->
         <div class="flex items-center justify-end gap-4 pt-6">
             <a href="{{ url_for('admin_dashboard', store_slug=store.slug_id) }}" 
                class="px-6 py-3 text-gray-300 hover:text-white font-semibold transition-colors">
@@ -2793,12 +2832,12 @@ def seed_database():
                 {'name': 'WhatsApp', 'icon': 'whatsapp', 'url': 'https://wa.me/17878914860'}
             ],
             'items': [
-                {'name': 'Pizza de Pepperoni', 'price': 12.50, 'item_code': 'MENU001', 'description': 'Clásica pizza de pepperoni con queso mozzarella', 'image_url': 'https://images.pexels.com/photos/1146760/pexels-photo-1146760.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Pizzas', 'Ingredients': 'Pepperoni, Queso Mozzarella, Salsa de Tomate'}},
-                {'name': 'Surtido Criollo', 'price': 18.00, 'item_code': 'MENU002', 'description': 'Variedad de platos criollos tradicionales', 'image_url': 'https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Aperitivos', 'Ingredients': 'Carne, Pollo, Tostones'}},
-                {'name': 'Mofongo con Carne Frita', 'price': 15.75, 'item_code': 'MENU003', 'description': 'Mofongo tradicional con carne frita jugosa', 'image_url': 'https://images.pexels.com/photos/593006/pexels-photo-593006.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Plátano, Carne Frita, Ajo'}},
-                {'name': 'Alitas de Pollo (BBQ o Picantes)', 'price': 9.95, 'item_code': 'MENU004', 'description': 'Alitas crujientes con salsa BBQ o picante', 'image_url': 'https://images.pexels.com/photos/2338407/pexels-photo-2338407.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Aperitivos', 'Ingredients': 'Alitas de Pollo, Salsa BBQ'}},
-                {'name': 'Churrasco con Tostones', 'price': 19.50, 'item_code': 'MENU005', 'description': 'Churrasco jugoso servido con tostones', 'image_url': 'https://images.pexels.com/photos/3186654/pexels-photo-3186654.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Churrasco, Tostones'}},
-                {'name': 'Hamburguesa Clásica', 'price': 11.25, 'item_code': 'MENU006', 'description': 'Hamburguesa clásica con todos los acompañamientos', 'image_url': 'https://images.pexels.com/photos/1639557/pexels-photo-1639557.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Carne, Queso, Vegetales'}},
+                {'name': 'Pizza de Pepperoni', 'price': 12.50, 'item_code': 'MENU001', 'description': 'Clásica pizza de pepperoni con queso mozzarella', 'image_url': 'https://images.unsplash.com/photo-1574071318508-1cdbab80d002?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Pizzas', 'Ingredients': 'Pepperoni, Queso Mozzarella, Salsa de Tomate'}},
+                {'name': 'Surtido Criollo', 'price': 18.00, 'item_code': 'MENU002', 'description': 'Variedad de platos criollos tradicionales', 'image_url': 'https://images.unsplash.com/photo-1544025162-d76694259a30?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Aperitivos', 'Ingredients': 'Carne, Pollo, Tostones'}},
+                {'name': 'Mofongo con Carne Frita', 'price': 15.75, 'item_code': 'MENU003', 'description': 'Mofongo tradicional con carne frita jugosa', 'image_url': 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Plátano, Carne Frita, Ajo'}},
+                {'name': 'Alitas de Pollo (BBQ o Picantes)', 'price': 9.95, 'item_code': 'MENU004', 'description': 'Alitas crujientes con salsa BBQ o picante', 'image_url': 'https://images.unsplash.com/photo-1527477396000-e27137b2c28b?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Aperitivos', 'Ingredients': 'Alitas de Pollo, Salsa BBQ'}},
+                {'name': 'Churrasco con Tostones', 'price': 19.50, 'item_code': 'MENU005', 'description': 'Churrasco jugoso servido con tostones', 'image_url': 'https://images.unsplash.com/photo-1558030006-450675393462?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Churrasco, Tostones'}},
+                {'name': 'Hamburguesa Clásica', 'price': 11.25, 'item_code': 'MENU006', 'description': 'Hamburguesa clásica con todos los acompañamientos', 'image_url': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Platos Principales', 'Ingredients': 'Carne, Queso, Vegetales'}},
             ],
             'specials': [
                 {'title': 'Happy Hour: Cervezas Locales', 'content': '🍺 Disfruta de 2x1 en todas las cervezas locales. Válido de 5pm a 7pm.'},
@@ -2818,11 +2857,11 @@ def seed_database():
             'phone': '15551234567',
             'phone_display': '(555) 123-4567',
             'hours': 'Monday-Saturday: 9am-7pm\nSunday: 11am-5pm',
-            'hero_image_url': 'https://images.pexels.com/photos/116675/pexels-photo-116675.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2',
+            'hero_image_url': 'https://images.pexels.com/photos/116675/pexels-photo-116675.jpeg?auto=compress&cs=tinysrgb&w=1600',
             'items': [
-                {'name': '2020 Toyota Camry', 'price': 18900.00, 'item_code': 'VIN001', 'description': 'Well-maintained sedan with low mileage', 'status': 'Available', 'attributes': {'Make': 'Toyota', 'Model': 'Camry', 'Year': '2020', 'Mileage': '25000', 'Color': 'Silver', 'Condition': 'Excellent'}},
-                {'name': '2019 Honda CR-V', 'price': 22900.00, 'item_code': 'VIN002', 'description': 'Spacious SUV perfect for families', 'status': 'Available', 'attributes': {'Make': 'Honda', 'Model': 'CR-V', 'Year': '2019', 'Mileage': '32000', 'Color': 'Black', 'Condition': 'Very Good'}},
-                {'name': '2021 Ford F-150', 'price': 32900.00, 'item_code': 'VIN003', 'description': 'Powerful truck ready for work or play', 'status': 'Pending', 'attributes': {'Make': 'Ford', 'Model': 'F-150', 'Year': '2021', 'Mileage': '18000', 'Color': 'Blue', 'Condition': 'Excellent'}},
+                {'name': '2020 Toyota Camry', 'price': 18900.00, 'item_code': 'VIN001', 'description': 'Well-maintained sedan with low mileage', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1617486496723-e46bd3c9bd9d?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Toyota', 'Model': 'Camry', 'Year': '2020', 'Mileage': '25000', 'Color': 'Silver', 'Condition': 'Excellent'}},
+                {'name': '2019 Honda CR-V', 'price': 22900.00, 'item_code': 'VIN002', 'description': 'Spacious SUV perfect for families', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1603386329225-868ef9bc733d?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Honda', 'Model': 'CR-V', 'Year': '2019', 'Mileage': '32000', 'Color': 'Black', 'Condition': 'Very Good'}},
+                {'name': '2021 Ford F-150', 'price': 32900.00, 'item_code': 'VIN003', 'description': 'Powerful truck ready for work or play', 'status': 'Pending', 'image_url': 'https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=800&auto=format&fit=crop', 'attributes': {'Make': 'Ford', 'Model': 'F-150', 'Year': '2021', 'Mileage': '18000', 'Color': 'Blue', 'Condition': 'Excellent'}},
             ],
             'specials': [
                 {'title': 'Spring Sale', 'content': '💰 0% APR financing available on select vehicles this month!'},
@@ -2840,11 +2879,11 @@ def seed_database():
             'phone': '15559876543',
             'phone_display': '(555) 987-6543',
             'hours': 'Monday-Friday: 8am-6pm\nSaturday: 9am-4pm',
-            'hero_image_url': 'https://images.pexels.com/photos/13065693/pexels-photo-13065693.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2',
+            'hero_image_url': 'https://images.unsplash.com/photo-1605559424843-9e4c228bf1c2?w=1600&auto=format&fit=crop',
             'items': [
-                {'name': 'Oil Change Service', 'price': 39.99, 'item_code': 'SRV001', 'description': 'Full synthetic oil change with filter replacement', 'status': 'Available', 'attributes': {'Service Type': 'Maintenance', 'Duration': '30 minutes', 'Warranty': '3 months'}},
-                {'name': 'Brake Inspection & Service', 'price': 89.99, 'item_code': 'SRV002', 'description': 'Complete brake system inspection and pad replacement', 'status': 'Available', 'attributes': {'Service Type': 'Repair', 'Duration': '1-2 hours', 'Warranty': '12 months'}},
-                {'name': 'Tire Rotation & Balance', 'price': 49.99, 'item_code': 'SRV003', 'description': 'Professional tire rotation and wheel balancing', 'status': 'Available', 'attributes': {'Service Type': 'Maintenance', 'Duration': '45 minutes', 'Warranty': '6 months'}},
+                {'name': 'Oil Change Service', 'price': 39.99, 'item_code': 'SRV001', 'description': 'Full synthetic oil change with filter replacement', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1581092160562-40aa08e78837?w=800&auto=format&fit=crop', 'attributes': {'Service Type': 'Maintenance', 'Duration': '30 minutes', 'Warranty': '3 months'}},
+                {'name': 'Brake Inspection & Service', 'price': 89.99, 'item_code': 'SRV002', 'description': 'Complete brake system inspection and pad replacement', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=800&auto=format&fit=crop', 'attributes': {'Service Type': 'Repair', 'Duration': '1-2 hours', 'Warranty': '12 months'}},
+                {'name': 'Tire Rotation & Balance', 'price': 49.99, 'item_code': 'SRV003', 'description': 'Professional tire rotation and wheel balancing', 'status': 'Available', 'image_url': 'https://images.pexels.com/photos/3802508/pexels-photo-3802508.jpeg?auto=compress&cs=tinysrgb&w=800', 'attributes': {'Service Type': 'Maintenance', 'Duration': '45 minutes', 'Warranty': '6 months'}},
             ],
             'specials': [
                 {'title': 'New Customer Special', 'content': '🔧 $10 off your first service! Mention this ad.'},
@@ -2862,10 +2901,10 @@ def seed_database():
             'phone': '15558889999',
             'phone_display': '(555) 888-9999',
             'hours': 'Monday-Friday: 9am-6pm\nBy Appointment',
-            'hero_image_url': 'https://images.pexels.com/photos/3184465/pexels-photo-3184465.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2',
+            'hero_image_url': 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1600&auto=format&fit=crop',
             'items': [
-                {'name': 'Home Cleaning Service', 'price': 120.00, 'item_code': 'SRV101', 'description': 'Professional deep cleaning for your home', 'status': 'Available', 'attributes': {'Service Type': 'Cleaning', 'Duration': '2-4 hours', "What's Included": 'Kitchen, Bathrooms, Living Areas'}},
-                {'name': 'Consulting Session', 'price': 150.00, 'item_code': 'SRV102', 'description': 'One-on-one business consulting', 'status': 'Available', 'attributes': {'Service Type': 'Consulting', 'Duration': '1 hour', "What's Included": 'Strategy Session & Action Plan'}},
+                {'name': 'Home Cleaning Service', 'price': 120.00, 'item_code': 'SRV101', 'description': 'Professional deep cleaning for your home', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop', 'attributes': {'Service Type': 'Cleaning', 'Duration': '2-4 hours', "What's Included": 'Kitchen, Bathrooms, Living Areas'}},
+                {'name': 'Consulting Session', 'price': 150.00, 'item_code': 'SRV102', 'description': 'One-on-one business consulting', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=800&auto=format&fit=crop', 'attributes': {'Service Type': 'Consulting', 'Duration': '1 hour', "What's Included": 'Strategy Session & Action Plan'}},
             ],
             'specials': [],
             'owner_email': 'owner@proservices.com',
@@ -2881,10 +2920,10 @@ def seed_database():
             'phone': '15557778888',
             'phone_display': '(555) 777-8888',
             'hours': 'Monday-Saturday: 10am-8pm\nSunday: 12pm-6pm',
-            'hero_image_url': 'https://images.pexels.com/photos/3962285/pexels-photo-3962285.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2',
+            'hero_image_url': 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1600&auto=format&fit=crop',
             'items': [
-                {'name': 'Premium Widget', 'price': 29.99, 'item_code': 'SKU001', 'description': 'High-quality widget for everyday use', 'status': 'Available', 'attributes': {'Category': 'Electronics', 'Brand': 'WidgetPro', 'Color': 'Black'}},
-                {'name': 'Deluxe Gadget', 'price': 49.99, 'item_code': 'SKU002', 'description': 'Advanced gadget with multiple features', 'status': 'Available', 'attributes': {'Category': 'Electronics', 'Brand': 'GadgetMaster', 'Color': 'Silver'}},
+                {'name': 'Premium Widget', 'price': 29.99, 'item_code': 'SKU001', 'description': 'High-quality widget for everyday use', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Electronics', 'Brand': 'WidgetPro', 'Color': 'Black'}},
+                {'name': 'Deluxe Gadget', 'price': 49.99, 'item_code': 'SKU002', 'description': 'Advanced gadget with multiple features', 'status': 'Available', 'image_url': 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=800&auto=format&fit=crop', 'attributes': {'Category': 'Electronics', 'Brand': 'GadgetMaster', 'Color': 'Silver'}},
             ],
             'specials': [
                 {'title': 'Grand Opening Sale', 'content': '🎉 20% off all items this week!'},
@@ -2921,7 +2960,7 @@ def seed_database():
             "gallery_image_1_url": demo.get('gallery_image_1_url'),
             "gallery_image_2_url": demo.get('gallery_image_2_url'),
             "menu_image_url": demo.get('menu_image_url'),
-            "google_maps_embed_html": demo.get('google_maps_embed_html'),
+            "google_maps_embed_html": demo.get('google_maps_embed_html') or '<iframe src="https://www.google.com/maps?q=Orlando,+FL+32812&output=embed" width="100%" height="100%" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>',
             "inventory_description": None,
             "socials": demo.get('socials', []),
             # Theme defaults
@@ -2975,7 +3014,7 @@ def seed_database():
     
     if created_count > 0:
         print(f"\n✅ Successfully created {created_count} demo store(s)!")
-        print("   You can now access them from the business type selection page.")
+        print("    You can now access them from the business type selection page.")
     else:
         print("\n✅ All demo stores already exist.")
 
