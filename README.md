@@ -41,28 +41,21 @@ A multi-business-type store application built with Flask and MongoDB. StoreFacto
    pip install flask pymongo python-dotenv
    ```
 
-3. **Set up environment variables**:
+3. **Start MongoDB Atlas Local** (for local development):
+   ```bash
+   docker run -p 27017:27017 mongodb/mongodb-atlas-local
+   ```
+
+4. **Set up environment variables**:
    Create a `.env` file in the root directory:
    ```env
    SECRET_KEY=your-secret-key-here
    MONGO_URI=mongodb://localhost:27017/?retryWrites=true&w=majority&directConnection=true
    ```
    
-   For remote MongoDB:
+   **Note**: For local development, use the MongoDB Atlas Local container above. When deploying to production, simply update `MONGO_URI` in your `.env` file with your production MongoDB connection string:
    ```env
    MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
-   ```
-
-4. **Start MongoDB** (if using local instance):
-   ```bash
-   # macOS
-   brew services start mongodb-community
-   
-   # Linux
-   sudo systemctl start mongod
-   
-   # Or use Docker
-   docker run -d -p 27017:27017 --name mongodb mongo
    ```
 
 5. **Run the application**:
